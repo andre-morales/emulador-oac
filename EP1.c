@@ -33,10 +33,8 @@ typedef struct {
 	size_t capacity;
 } StringBuffer;
 
-void stbInit(StringBuffer*);
-bool stbPrint(StringBuffer*, const char* fmt, ...);
-void stbFree(StringBuffer*); 
-
+// Funções da interface e execução do emulador
+void waitUserCommand();
 void badInstruction(Registers* r);
 void dumpRegisters(Registers* regs);
 void guardAddress(Emul* emul, uint16_t addr);
@@ -48,6 +46,12 @@ uint16_t* getRegisterWithBits(Registers* r, uint8_t code);
 StringBuffer disassembly(uint16_t instruction);
 void pause();
 
+// Funções auxiliares de manipulação de strings
+void stbInit(StringBuffer*);
+bool stbPrint(StringBuffer*, const char* fmt, ...);
+void stbFree(StringBuffer*); 
+
+// Tabelas estáticas
 static const char* const INSTRUCTION_NAMES[] = {
 	"NOP",  // 0000b
 	"LDA",  // 0001b
@@ -89,6 +93,9 @@ static const char* const ARIT_OP_NAMES[] = {
 	"SUB"   // 111b
 };
 
+// Estrutura global de emulação
+Emul emulator;
+
 int processa (short unsigned int* m, int memSize) {
 	uint16_t* memory = (uint16_t*)m;
 
@@ -104,11 +111,10 @@ int processa (short unsigned int* m, int memSize) {
 	r.PSW = 0;
 
 	// Estrutura do emulador
-	Emul emul;
-	emul.memory = memory;
-	emul.memorySize = memSize;
-	emul.registers = &r;
-	emul.breaking = true;
+	emulator.memory = memory;
+	emulator.memorySize = memSize;
+	emulator.registers = &r;
+	emulator.breaking = true;
 
 	do {
 		// Lê a instrução atual
@@ -120,30 +126,25 @@ int processa (short unsigned int* m, int memSize) {
 		// Extrai o argumento X da instrução, usado nas operações LDA, STA, JMP e JNZ
 		uint16_t argument = (r.RI & 0x0FFF);
 
-		// Imprime a instrução atual
-		//printf("[%3Xh] %X_%03X: %s ", r.PC, opcode, argument, INSTRUCTION_NAMES[opcode]);
-		printf("[%3Xh] %X_%03X: ", r.PC, opcode, argument);
+		// Imprime a posição e o código da instrução atual
+		printf("[%3Xh] %X.%03X: ", r.PC, opcode, argument);
 
+		// Imprime o disassembly da instrução
 		StringBuffer instructionStr = disassembly(r.RI);
-		printf("%s", instructionStr.buffer);
+		printf("%s\n", instructionStr.buffer);
 		stbFree(&instructionStr);
 
 		// Se o emulador está em modo step-through, permita ao usuário decidir o que fazer antes
 		// de executar qualquer instrução
-		/*if (emul.breaking) {		
-			printf("\n> ");
-			
-			char line[128];
-			fgets(line, 128, stdin);
-		}*/
+		if (emulator.breaking) {
+			waitUserCommand();
+		}
 
 		// Executa a instrução com seu argumento opcional
-		int result = executeInstruction(&emul, opcode, argument);
+		int result = executeInstruction(&emulator, opcode, argument);
 		if (result == 1) {
 			break;
 		}
-
-		printf("\n");
 
 		// Incrementa o ponteiro para a próxima instrução
 		r.PC++;
@@ -157,6 +158,78 @@ int processa (short unsigned int* m, int memSize) {
 	printf("\nCPU Halted.\n");
 
 	return 0;
+}
+
+void waitUserCommand() {
+	const size_t BUFFER_SIZE = 128;
+	static char commandBuffer1[128] = { 0 };
+	static char commandBuffer2[128] = { 0 };
+
+	static char* commandBuffer = commandBuffer1;
+	static char* lastCommand = commandBuffer2;
+
+	// Loop infinito apenas interrompido quando o usuário digitar um comando válido
+	while (true) {	
+		printf(" >> ");
+		
+		// Lê uma linha de comando		
+		fgets(commandBuffer, BUFFER_SIZE, stdin);
+
+		// Remove a quebra de linha da string
+		for (int i = 0; i < BUFFER_SIZE; i++) {
+			if (commandBuffer[i] == '\n') {
+				commandBuffer[i] = '\0';
+				break;
+			}
+		}
+
+		// Se a linha digitada for completamente vazia, o usuário apenas apertou enter e o comando
+		// anterior será executado novamente
+		char cmdLine[BUFFER_SIZE];
+		if (commandBuffer[0] == '\0') {
+			strncpy(cmdLine, lastCommand, BUFFER_SIZE);
+		} else {
+			strncpy(cmdLine, commandBuffer, BUFFER_SIZE);
+
+			// Faz o swap do buffer de comando anterior e atual
+			char* tmp = commandBuffer;
+			commandBuffer = lastCommand;
+			lastCommand = tmp;
+		}
+
+		// Obtém o comando principal antes do espaço
+		char* command = strtok(cmdLine, " ");
+
+		// Comando step: Permite executar a próxima instrução mas continua no modo step-through
+		if (strcmp(command, "s") == 0) {
+			return;
+		}
+
+		// Comando continue: Desativa o modo step-through do emulador
+		if (strcmp(command, "c") == 0) {
+			printf("Resuming execution...\n");
+			emulator.breaking = false;
+			return;	
+		}
+
+		// Comando registers: Imprime o conteúdo de todos os registradores
+		if (strcmp(command, "r") == 0) {
+			dumpRegisters(emulator.registers);
+		}
+
+		// Comando disassembly: Imprime a instrução atual e a sua posição
+		if (strcmp(command, "d") == 0) {
+			uint32_t counter = emulator.registers->PC;
+			uint32_t instruction = emulator.registers->RI;
+				
+			uint8_t opcode = (instruction & 0xF000) >> 12;
+			uint16_t argument = (instruction & 0x0FFF);
+
+			StringBuffer sb = disassembly(instruction);
+			printf("[%3Xh] %X.%03X: %s\n", counter, opcode, argument, sb.buffer);
+			stbFree(&sb);
+		}
+	}
 }
 
 int executeInstruction(Emul* emul, uint8_t opcode, uint16_t argument) {
@@ -294,11 +367,6 @@ void doArit(Emul* emul, uint16_t argument) {
 	uint16_t op1 = *regOp1;
 	uint16_t op2 = (regOp2) ? *regOp2 : 0;
 
-	printf("%s, ", ARIT_OP_NAMES[bitsOpr]);
-	printf("%s, ", REGISTER_NAMES[bitsDst]);
-	printf("%s, ", REGISTER_NAMES[bitsOp1]);
-	printf("%s ", (regOp2) ? REGISTER_NAMES[bitsOp2 & 0b011] : "zero");
-
 	switch(bitsOpr) {
 	// Set FFFFh
 	case 0:
@@ -378,10 +446,26 @@ StringBuffer disassembly(uint16_t instruction) {
 		stbPrint(buffer, "%Xh", argument);
 		break;
 
-	// ARIT(x) -- 0110b
-	// Executa uma operação aritmética.
+	// ARIT(opr, dst, op1, op2) -- 0110b
 	case 0x6:
-		//doArit(emul, argument);
+		// Extração dos bits respectivamente:
+		// 3 bits que determinam a operação aritmética a realizar
+		// 3 bits que definem o registrador destino da operação
+		// 3 bits que definem o registrador do primeiro operando
+		// 3 bits que definem o registrador do segundo operando
+		uint8_t bitsOpr = (argument & 0b111000000000) >> 9;
+		uint8_t bitsDst = (argument & 0b000111000000) >> 6;
+		uint8_t bitsOp1 = (argument & 0b000000111000) >> 3;	
+		uint8_t bitsOp2 =  argument & 0b000000000111;
+
+		// Se o bit mais significante do operando 2 for 0, o operando em si é o 0 imediato
+		bool op2zero = (bitsOp2 & 0b100) != 0;
+
+		// Imprime em sequência OPERAÇÃO, RES, OP1, OP2
+		stbPrint(buffer, "%s, ", ARIT_OP_NAMES[bitsOpr]);
+		stbPrint(buffer, "%s, ", REGISTER_NAMES[bitsDst]);
+		stbPrint(buffer, "%s, ", REGISTER_NAMES[bitsOp1]);
+		stbPrint(buffer, "%s ", (op2zero) ? "zero" : REGISTER_NAMES[bitsOp2 & 0b011]);
 		break;
 
 	// HLT - 1111b
@@ -444,6 +528,7 @@ void pause() {
 	getchar();
 }
 
+// -- Funções de manipulação de StringBuffer --
 void stbInit(StringBuffer* sb) {
 	sb->capacity = 512;
 	sb->position = 0;
