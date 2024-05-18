@@ -24,9 +24,10 @@ typedef struct {
 void pause();
 void badInstruction(Registers* r);
 void dumpRegisters(Registers* regs);
-void verifyAddress(Registers* r, uint16_t addr, uint16_t size);
+void guardAddress(Emul* emul, uint16_t addr);
 void fault(Registers* r);
 void faultMsg(Emul* emul, const char* fmt, ...);
+int executeInstruction(Emul* emul, uint8_t opcode, uint16_t argument);
 void doArit(Emul* emul, uint16_t argument);
 uint16_t* getRegisterWithBits(Registers* r, uint8_t code);
 
@@ -57,7 +58,7 @@ static const char* const REGISTER_NAMES[] = {
 	"?", // 100b
 	"?", // 101b
 	"?", // 110b
-	"?", // 111b
+	"PSW", // 111b
 };
 
 static const char* const ARIT_OP_NAMES[] = {
@@ -93,93 +94,129 @@ int processa (short int* m, int memSize) {
 
 	do {
 		// Lê a instrução atual
-		r.RI = memory[r.PC];		
+		r.RI = memory[r.PC];	
+
 		// Extrai da instrução atual os 4 bits do código de operação
 		uint8_t opcode = (r.RI & 0xF000) >> 12;
 
 		// Extrai o argumento X da instrução, usado nas operações LDA, STA, JMP e JNZ
 		uint16_t argument = (r.RI & 0x0FFF);
 
-		// Imprime o program counter atual
-		printf("[%3xh] %X_%03X: %s ", r.PC, opcode, argument, INSTRUCTION_NAMES[opcode]);
+		// Imprime a instrução atual
+		printf("[%3Xh] %X_%03X: %s ", r.PC, opcode, argument, INSTRUCTION_NAMES[opcode]);
 
-		// HLT - Opcode (1111)b
-		// Interrompe a execução do processador
-		if (opcode == 0xF) {
+		// Executa a instrução com seu argumento opcional
+		int result = executeInstruction(&emul, opcode, argument);
+		if (result == 1) {
 			break;
 		}
-		
-		switch(opcode) {
-		// NOP -- Opcode (0000)b
-		// Não faz nada
-		case 0x0:
-			break;
 
-		// LDA(x) -- Opcode (0001)b
-		// Carrega o acumulador (A) com o conteúdo da memória em X
-		case 0x1:
-			printf("[%Xh]", argument);
-
-			// Garante a validade do endereço de memória X
-			verifyAddress(&r, argument, memSize);
-
-			r.A = memory[argument];
-			break;
-
-		case 0x2:
-			printf("[%Xh]", argument);
-
-			// Garante a validade do endereço de memória X
-			verifyAddress(&r, argument, memSize);
-
-			memory[argument] = r.A;
-			break;
-
-		// JNZ(x) -- Opcode (0100)b
-		// Se o acumulador for != de 0, armazena o endereço da próxima instrução em R e salta para
-		// o endereço especificado no argumento X
-		case 0x4:
-			printf("[%x]", argument);
-
-			// Garante que o destino X de salto é válido
-			verifyAddress(&r, argument, memSize);
-
-			if (r.A != 0) {
-				// Salva R como o endereço da próxima instrução
-				r.R = r.PC + 1;
-
-				// Modifica o contador pro endereço X - 1. Subtraímos 1 pois o loop já incrementa
-				// em 1 o PC.
-				r.PC = argument - 1;
-			}
-
-			break;
-
-		// ARIT(x) -- Opcode (0110)b
-		// Executa uma operação aritmética.
-		case 0x6:
-			doArit(&emul, argument);
-			break;
-
-		// Instrução desconhecida
-		default:
-			printf(" ??? 0x%i : 0x%i\n", opcode, argument);
-
-			badInstruction(&r);	
-		}
-		
 		printf("\n");
 
 		// Incrementa o ponteiro para a próxima instrução
 		r.PC++;
 
 		// Se o contador de programa ultrapassou o limite da memória, reinicie-o em 0.
-		if (r.PC >= memSize) r.PC=0;
+		if (r.PC >= memSize) r.PC = 0;
 
 	// O programa para ao encontrar HLT
 	} while ((r.RI & 0xF000) != 0xF000);
 
 	printf("\nCPU Halted.\n");
+}
+
+int executeInstruction(Emul* emul, uint8_t opcode, uint16_t argument) {
+	Registers* regs = emul->registers;
+	uint16_t* memory = emul->memory;
+
+	switch(opcode) {
+	// NOP -- Opcode (0000)b
+	// Não faz nada
+	case 0x0:
+		break;
+
+	// LDA(x) -- Opcode (0001)b
+	// Carrega o acumulador (A) com o conteúdo da memória em X
+	case 0x1: {
+		printf("[%Xh]", argument);
+
+		// Garante a validade do endereço de memória X
+		guardAddress(emul, argument);
+
+		regs->A = memory[argument];
+		break;
+	}
+
+	// STA(x) -- Opcode (0010)b
+	// Armazena no endereço imediato X o valor do acumulador A
+	case 0x2: {
+		printf("[%Xh]", argument);
+
+		// Garante a validade do endereço de memória X
+		guardAddress(emul, argument);
+
+		memory[argument] = regs->A;
+		break;
+	}
+
+	// JMP(x) -- Opcode (0011)b
+	// Pula incondicionalmente para o endereço imediato X
+	/*case 0x3: {
+		printf("%Xh", argument);
+
+		// Garante que o destino X de salto é válido
+		guardAddress(emul, argument);
+
+		// Salva R como o endereço da próxima instrução
+		regs->R = regs->PC + 1;
+
+		// Modifica o contador pro endereço X - 1. Subtraímos 1 pois o loop já incrementa
+		// em 1 o PC.
+		regs->PC = argument - 1;
+		break;
+	}*/
+
+	// JNZ(x) -- Opcode (0100)b
+	// Se o acumulador for != de 0, armazena o endereço da próxima instrução em R e salta para
+	// o endereço especificado no argumento X
+	case 0x4: {
+		printf("%Xh", argument);
+
+		// Garante que o destino X de salto é válido
+		guardAddress(emul, argument);
+
+		if (regs->A != 0) {
+			// Salva R como o endereço da próxima instrução
+			regs->R = regs->PC + 1;
+
+			// Modifica o contador pro endereço X - 1. Subtraímos 1 pois o loop já incrementa
+			// em 1 o PC.
+			regs->PC = argument - 1;
+		}
+
+		break;
+	}
+
+	// ARIT(x) -- Opcode (0110)b
+	// Executa uma operação aritmética.
+	case 0x6: {
+		doArit(emul, argument);
+		break;
+	}
+
+	// HLT - Opcode (1111)b
+	// Interrompe a execução do processador
+	case 0xF:
+		return 1;
+
+	// Instrução desconhecida
+	default: {
+		printf(" ??? 0x%X : 0x%X\n", opcode, argument);
+
+		badInstruction(regs);	
+		break;
+	}
+	}
 }
 
 void doArit(Emul* emul, uint16_t argument) {
@@ -210,13 +247,14 @@ void doArit(Emul* emul, uint16_t argument) {
 	}
 
 	// Obtém o registrador operando usando os bits de Op2
-	// Se o bit mais significante do operando 2 estiver setado. O operando 2 será o número 0,
-	// aqui considerado como NULL, caso contrário, será o registrador mesmo
 	uint16_t* regOp2;
-	if (bitsOp2 & 0b100 == 0b100) {
+
+	// Se o bit mais significante do operando 2 for 0, o operando é considerado como o próprio número 0.
+	if ((bitsOp2 & 0b100) == 0) {
 		regOp2 = NULL;
+	// Caso contrário, os outros dois bits selecionarão um registrador de A, B, C ou D
 	} else {
-		regOp2 = getRegisterWithBits(emul->registers, bitsOp2);
+		regOp2 = getRegisterWithBits(emul->registers, bitsOp2 & 0b011);
 		if (!regOp2) {
 			faultMsg(emul, "Invalid arit register op2 code: %i\n", bitsOp2);
 			return;
@@ -231,7 +269,7 @@ void doArit(Emul* emul, uint16_t argument) {
 	printf("%s, ", ARIT_OP_NAMES[bitsOpr]);
 	printf("%s, ", REGISTER_NAMES[bitsDst]);
 	printf("%s, ", REGISTER_NAMES[bitsOp1]);
-	printf("%s ", (regOp2)?REGISTER_NAMES[bitsOp2]:"zero");
+	printf("%s ", (regOp2) ? REGISTER_NAMES[bitsOp2 & 0b011] : "zero");
 
 	switch(bitsOpr) {
 	// Set FFFFh
@@ -272,22 +310,24 @@ uint16_t* getRegisterWithBits(Registers* r, uint8_t code) {
 		return &r->C;
 	case 0x3:
 		return &r->D;
-	//case 0x6:
-	//	return &r->R;
+	case 0x7:
+		return &r->PSW;
 	default:
 		return NULL;
 	}
 }
 
-void verifyAddress(Registers* r, uint16_t addr, uint16_t size) {
-	if (addr >= size) {
+// Verifica se um enderço se memória está dentro dos limites possíveis do tamanho da memória
+// do emulador. Se o endereço estiver fora do limite, causa uma falha.
+void guardAddress(Emul* emul, uint16_t addr) {
+	if (addr >= emul->memorySize) {
 		printf("[!] Memory access out of bounds (%x)\n", addr);
-		fault(r);
+		fault(emul->registers);
 	}
 }
 
 void badInstruction(Registers* r) {
-	printf ("[!] Bad instruction 0x%hx em 0x%hx --\n", r->RI, r->PC);
+	printf ("[!] Bad instruction 0x%hx at 0x%hx --\n", r->RI, r->PC);
 	fault(r);
 }
 
