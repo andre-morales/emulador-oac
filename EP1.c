@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdarg.h>
+#include <stdbool.h>
+#include <stdlib.h>
 
 // Definição dos registradores do processador
 typedef struct {
@@ -15,13 +17,26 @@ typedef struct {
 	uint16_t PSW;
 } Registers;
 
+// Definição da estrutura do emulador
 typedef struct {
 	Registers* registers;
 	uint16_t* memory;
 	uint16_t memorySize;
+	bool breaking;
 } Emul;
 
-void pause();
+// Definição de string buffer para a formatação de mensagens
+typedef struct {
+	char* buffer;
+	size_t position;
+	size_t size;
+	size_t capacity;
+} StringBuffer;
+
+void stbInit(StringBuffer*);
+bool stbPrint(StringBuffer*, const char* fmt, ...);
+void stbFree(StringBuffer*); 
+
 void badInstruction(Registers* r);
 void dumpRegisters(Registers* regs);
 void guardAddress(Emul* emul, uint16_t addr);
@@ -30,6 +45,8 @@ void faultMsg(Emul* emul, const char* fmt, ...);
 int executeInstruction(Emul* emul, uint8_t opcode, uint16_t argument);
 void doArit(Emul* emul, uint16_t argument);
 uint16_t* getRegisterWithBits(Registers* r, uint8_t code);
+StringBuffer disassembly(uint16_t instruction);
+void pause();
 
 static const char* const INSTRUCTION_NAMES[] = {
 	"NOP",  // 0000b
@@ -72,7 +89,7 @@ static const char* const ARIT_OP_NAMES[] = {
 	"SUB"   // 111b
 };
 
-int processa (short int* m, int memSize) {
+int processa (short unsigned int* m, int memSize) {
 	uint16_t* memory = (uint16_t*)m;
 
 	// Inicialização dos registradores
@@ -91,6 +108,7 @@ int processa (short int* m, int memSize) {
 	emul.memory = memory;
 	emul.memorySize = memSize;
 	emul.registers = &r;
+	emul.breaking = true;
 
 	do {
 		// Lê a instrução atual
@@ -103,7 +121,21 @@ int processa (short int* m, int memSize) {
 		uint16_t argument = (r.RI & 0x0FFF);
 
 		// Imprime a instrução atual
-		printf("[%3Xh] %X_%03X: %s ", r.PC, opcode, argument, INSTRUCTION_NAMES[opcode]);
+		//printf("[%3Xh] %X_%03X: %s ", r.PC, opcode, argument, INSTRUCTION_NAMES[opcode]);
+		printf("[%3Xh] %X_%03X: ", r.PC, opcode, argument);
+
+		StringBuffer instructionStr = disassembly(r.RI);
+		printf("%s", instructionStr.buffer);
+		stbFree(&instructionStr);
+
+		// Se o emulador está em modo step-through, permita ao usuário decidir o que fazer antes
+		// de executar qualquer instrução
+		/*if (emul.breaking) {		
+			printf("\n> ");
+			
+			char line[128];
+			fgets(line, 128, stdin);
+		}*/
 
 		// Executa a instrução com seu argumento opcional
 		int result = executeInstruction(&emul, opcode, argument);
@@ -123,6 +155,8 @@ int processa (short int* m, int memSize) {
 	} while ((r.RI & 0xF000) != 0xF000);
 
 	printf("\nCPU Halted.\n");
+
+	return 0;
 }
 
 int executeInstruction(Emul* emul, uint8_t opcode, uint16_t argument) {
@@ -138,8 +172,6 @@ int executeInstruction(Emul* emul, uint8_t opcode, uint16_t argument) {
 	// LDA(x) -- Opcode (0001)b
 	// Carrega o acumulador (A) com o conteúdo da memória em X
 	case 0x1: {
-		printf("[%Xh]", argument);
-
 		// Garante a validade do endereço de memória X
 		guardAddress(emul, argument);
 
@@ -150,8 +182,6 @@ int executeInstruction(Emul* emul, uint8_t opcode, uint16_t argument) {
 	// STA(x) -- Opcode (0010)b
 	// Armazena no endereço imediato X o valor do acumulador A
 	case 0x2: {
-		printf("[%Xh]", argument);
-
 		// Garante a validade do endereço de memória X
 		guardAddress(emul, argument);
 
@@ -180,8 +210,6 @@ int executeInstruction(Emul* emul, uint8_t opcode, uint16_t argument) {
 	// Se o acumulador for != de 0, armazena o endereço da próxima instrução em R e salta para
 	// o endereço especificado no argumento X
 	case 0x4: {
-		printf("%Xh", argument);
-
 		// Garante que o destino X de salto é válido
 		guardAddress(emul, argument);
 
@@ -211,12 +239,12 @@ int executeInstruction(Emul* emul, uint8_t opcode, uint16_t argument) {
 
 	// Instrução desconhecida
 	default: {
-		printf(" ??? 0x%X : 0x%X\n", opcode, argument);
-
 		badInstruction(regs);	
 		break;
 	}
 	}
+
+	return 0;
 }
 
 void doArit(Emul* emul, uint16_t argument) {
@@ -317,6 +345,58 @@ uint16_t* getRegisterWithBits(Registers* r, uint8_t code) {
 	}
 }
 
+StringBuffer disassembly(uint16_t instruction) {
+	// Inicializa um buffer para as strings impressas nessa função
+	StringBuffer bufferStg;
+	StringBuffer* buffer = &bufferStg;
+	stbInit(buffer);
+
+	// Extrai o opcode e o argumento X da instrução
+	uint8_t opcode = (instruction & 0xF000) >> 12;
+	uint16_t argument = (instruction & 0x0FFF);
+
+	// Imprime o nome da instrução
+	stbPrint(buffer, "%s ", INSTRUCTION_NAMES[opcode]);
+
+	switch(opcode) {
+	// NOP -- 0000b
+	case 0x0:
+		break;
+
+	// LDA(x) -- 0001b
+	case 0x1:
+		stbPrint(buffer, "[%Xh]", argument);
+		break;
+
+	// STA(x) -- 0010b
+	case 0x2:
+		stbPrint(buffer, "[%Xh]", argument);
+		break;
+
+	// JNZ(x) -- 0100b
+	case 0x4:
+		stbPrint(buffer, "%Xh", argument);
+		break;
+
+	// ARIT(x) -- 0110b
+	// Executa uma operação aritmética.
+	case 0x6:
+		//doArit(emul, argument);
+		break;
+
+	// HLT - 1111b
+	case 0xF:
+		break;
+
+	// Instrução desconhecida
+	default:
+		stbPrint(buffer, " ??? 0x%X : 0x%X\n", opcode, argument);
+		break;
+	}
+
+	return bufferStg;
+}
+
 // Verifica se um enderço se memória está dentro dos limites possíveis do tamanho da memória
 // do emulador. Se o endereço estiver fora do limite, causa uma falha.
 void guardAddress(Emul* emul, uint16_t addr) {
@@ -362,4 +442,40 @@ void dumpRegisters(Registers* regs) {
 
 void pause() {
 	getchar();
+}
+
+void stbInit(StringBuffer* sb) {
+	sb->capacity = 512;
+	sb->position = 0;
+	sb->size = 0;
+	sb->buffer = (char*) malloc(sizeof(char) * sb->capacity);
+}
+
+bool stbPrint(StringBuffer* sb, const char* fmt, ...) {
+	char* ptr = sb->buffer + sb->position;
+	size_t len = sb->capacity - sb->size;
+
+	va_list args;
+	va_start(args, fmt);
+	int written = vsnprintf(ptr, len, fmt, args);
+	va_end(args);
+
+	// Erro de formatação. Não foi escrito nada
+	if (written < 0) return false;
+
+	// Tamanho do buffer insuficiente
+	if (written >= len) {
+		return false;
+	}
+
+	// Escrita bem sucedida
+	sb->position += written;
+	return true;
+}
+
+void stbFree(StringBuffer* sb) {
+	free(sb->buffer);
+	sb->size = 0;
+	sb->capacity = 0;
+	sb->position = 0;
 }
