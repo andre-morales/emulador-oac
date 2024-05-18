@@ -39,12 +39,14 @@ void badInstruction(Registers* r);
 void dumpRegisters(Registers* regs);
 void guardAddress(Emul* emul, uint16_t addr);
 void fault(Registers* r);
-void faultMsg(Emul* emul, const char* fmt, ...);
+void faultMsg(const char* fmt, ...);
 int executeInstruction(Emul* emul, uint8_t opcode, uint16_t argument);
 void doArit(Emul* emul, uint16_t argument);
 uint16_t* getRegisterWithBits(Registers* r, uint8_t code);
 StringBuffer disassembly(uint16_t instruction);
 void pause();
+void setBit(uint16_t* reg, int bit, bool value);
+bool getBit(uint16_t value, int bit);
 
 // Funções auxiliares de manipulação de strings
 void stbInit(StringBuffer*);
@@ -116,6 +118,8 @@ int processa (short unsigned int* m, int memSize) {
 	emulator.registers = &r;
 	emulator.breaking = true;
 
+	printf("Memory size: 0x%X words.\n", memSize);
+
 	do {
 		// Lê a instrução atual
 		r.RI = memory[r.PC];	
@@ -167,6 +171,14 @@ void waitUserCommand() {
 
 	static char* commandBuffer = commandBuffer1;
 	static char* lastCommand = commandBuffer2;
+	static int instructionsLeft = 0;
+
+	// Se o usuário pediu para executar um número x de instruções antes, não pare a execução
+	// nessa função
+	if (instructionsLeft > 0) {
+		--instructionsLeft;
+		return;
+	}
 
 	// Loop infinito apenas interrompido quando o usuário digitar um comando válido
 	while (true) {	
@@ -200,8 +212,15 @@ void waitUserCommand() {
 		// Obtém o comando principal antes do espaço
 		char* command = strtok(cmdLine, " ");
 
-		// Comando step: Permite executar a próxima instrução mas continua no modo step-through
+		// Comando step <amount>: Permite executar um número de instruções em sequência
 		if (strcmp(command, "s") == 0) {
+			instructionsLeft = 0;
+
+			char* amountStr = strtok(NULL, " ");
+			if (amountStr) {
+				sscanf(amountStr, "%i", &instructionsLeft);
+				instructionsLeft--;
+			}
 			return;
 		}
 
@@ -217,17 +236,78 @@ void waitUserCommand() {
 			dumpRegisters(emulator.registers);
 		}
 
-		// Comando disassembly: Imprime a instrução atual e a sua posição
+		// Comando disassembly [address] [amount]: Imprime um número de instruções no endereço dado
+		// Se não for passado um endereço. Imprime a instrução atual
 		if (strcmp(command, "d") == 0) {
-			uint32_t counter = emulator.registers->PC;
-			uint32_t instruction = emulator.registers->RI;
-				
-			uint8_t opcode = (instruction & 0xF000) >> 12;
-			uint16_t argument = (instruction & 0x0FFF);
+			uint32_t address = emulator.registers->PC;
+			uint32_t amount = 1;
 
-			StringBuffer sb = disassembly(instruction);
-			printf("[%3Xh] %X.%03X: %s\n", counter, opcode, argument, sb.buffer);
-			stbFree(&sb);
+			// Se for passado um endereço, o transforma em número e salva em address
+			char* addressStr = strtok(NULL, " ");
+			if (addressStr) {
+				sscanf(addressStr, "%X", &address);
+			}
+
+			// Garante que address está nos limites da memória
+			if (address >= emulator.memorySize) {
+				printf("Memory address 0x%X out of bounds (0x%X)\n", address, emulator.memorySize);
+				continue;
+			}
+
+			// Se for passado uma quantidade, a transforma em número e salva em Amount
+			char* amountStr = strtok(NULL, " ");
+			if (amountStr) {
+				sscanf(amountStr, "%X", &amount);
+			}
+
+			// Imprime as instruções linha por linha
+			for (int i = 0; i < amount; i++) {
+				uint32_t instruction = emulator.memory[address + i];
+					
+				uint8_t opcode = (instruction & 0xF000) >> 12;
+				uint16_t argument = (instruction & 0x0FFF);
+
+				StringBuffer sb = disassembly(instruction);
+				printf("[%3Xh] %X.%03X: %s\n", address + i, opcode, argument, sb.buffer);
+				stbFree(&sb);
+			}
+		}
+
+		// Comando memory <address> [words]: Observa a memória no ponto dado
+		if (strcmp(command, "m") == 0 || strcmp(command, "x") == 0) {
+			// Obtém em string o número do endereço
+			char* pointStr = strtok(NULL, " ");
+			if (!pointStr) {
+				printf("A source point must be passed to the memory command.\n");
+				continue;
+			}
+
+			// Transforma o endereço em número
+			int point;
+			sscanf(pointStr, "%X", &point);
+
+			if (point < 0 || point >= emulator.memorySize) {
+				printf("Memory address 0x%X out of bounds (0x%X)\n", point, emulator.memorySize);
+				continue;
+			}
+
+			// Obtém o número de palavras a observar, se o usuário passar esse argumento
+			int words = 8;
+			char* wordsStr = strtok(NULL, " ");
+			if (wordsStr) {
+				sscanf(wordsStr, "%X", &words);
+			}
+
+			// Imprime as palavras
+			for (int i = 0; i < words; i++) {
+				if (i % 8 == 0) {
+					printf("\n[%3Xh] ", point);
+				}
+				printf("%04X ", emulator.memory[point]);
+				point++;
+			}
+
+			printf("\n");
 		}
 	}
 }
@@ -264,9 +344,7 @@ int executeInstruction(Emul* emul, uint8_t opcode, uint16_t argument) {
 
 	// JMP(x) -- Opcode (0011)b
 	// Pula incondicionalmente para o endereço imediato X
-	/*case 0x3: {
-		printf("%Xh", argument);
-
+	case 0x3: {
 		// Garante que o destino X de salto é válido
 		guardAddress(emul, argument);
 
@@ -277,7 +355,7 @@ int executeInstruction(Emul* emul, uint8_t opcode, uint16_t argument) {
 		// em 1 o PC.
 		regs->PC = argument - 1;
 		break;
-	}*/
+	}
 
 	// JNZ(x) -- Opcode (0100)b
 	// Se o acumulador for != de 0, armazena o endereço da próxima instrução em R e salta para
@@ -321,6 +399,8 @@ int executeInstruction(Emul* emul, uint8_t opcode, uint16_t argument) {
 }
 
 void doArit(Emul* emul, uint16_t argument) {
+	uint16_t* PSW = &emulator.registers->PSW;
+
 	// Extrai os 3 bits que determinam a operação aritmética a realizar
 	uint8_t bitsOpr = (argument & 0b111000000000) >> 9;
 
@@ -336,14 +416,14 @@ void doArit(Emul* emul, uint16_t argument) {
 	// Obtém o registrador destino usando os bits de Res
 	uint16_t* regDst = getRegisterWithBits(emul->registers, bitsDst);
 	if (!regDst) {
-		faultMsg(emul, "Invalid arit register destination code: %i\n", bitsDst);
+		faultMsg("Invalid arit register destination code: %i\n", bitsDst);
 		return;
 	}
 
 	// Obtém o registrador operando usando os bits de Op1
 	uint16_t* regOp1 = getRegisterWithBits(emul->registers, bitsOp1);
 	if (!regOp1) {
-		faultMsg(emul, "Invalid arit register op1 code: %i\n", bitsOp1);
+		faultMsg("Invalid arit register op1 code: %i\n", bitsOp1);
 		return;
 	}
 
@@ -357,7 +437,7 @@ void doArit(Emul* emul, uint16_t argument) {
 	} else {
 		regOp2 = getRegisterWithBits(emul->registers, bitsOp2 & 0b011);
 		if (!regOp2) {
-			faultMsg(emul, "Invalid arit register op2 code: %i\n", bitsOp2);
+			faultMsg("Invalid arit register op2 code: %i\n", bitsOp2);
 			return;
 		}	
 	}	
@@ -368,7 +448,7 @@ void doArit(Emul* emul, uint16_t argument) {
 	uint16_t op2 = (regOp2) ? *regOp2 : 0;
 
 	switch(bitsOpr) {
-	// Set FFFFh
+	/*// Set FFFFh
 	case 0:
 		//printf("SETF, ");
 		break;
@@ -377,23 +457,41 @@ void doArit(Emul* emul, uint16_t argument) {
 		break;
 	case 2:
 		//printf("NOT, ");
-		break;
+		break;*/
 	case 3:
-		//printf("AND, ");
+		*regDst = op1 & op2;
 		break;
 	case 4:
-		//printf("OR, ");
+		*regDst = op1 | op2;
 		break;
+		/*
 	case 5:
 		//printf("XOR, ");
-		break;
+		break;*/
 	case 6:
-		//printf("ADD, ");
+		// Salva a soma já truncada no registrador
+		uint32_t sum = op1 + op2;
+		*regDst = (uint16_t)sum;
+
+		// Seta o bit de overflow (bit 15) se a soma transborda ou não
+		bool overflowed = sum > 0xFFFF;
+		setBit(PSW, 15, overflowed);
 		break;
-	case 7:
+	/*case 7:
 		//printf("SUB, ");
+		break;*/
+	default:
+		faultMsg("Unimplemented arit operation %i\n", (int)bitsOpr);
 		break;
 	}
+
+	// Compara os operandos 1 e 2 e seta os bits 13, 12 e 11 de acordo com as comparações
+	bool less = op1 < op2;
+	bool equal = op1 == op2;
+	bool greater = op1 > op2;
+	setBit(PSW, 13, less);
+	setBit(PSW, 12, equal);
+	setBit(PSW, 11, greater);
 }
 
 uint16_t* getRegisterWithBits(Registers* r, uint8_t code) {
@@ -441,6 +539,11 @@ StringBuffer disassembly(uint16_t instruction) {
 		stbPrint(buffer, "[%Xh]", argument);
 		break;
 
+	// JMP(x) -- 0011b
+	case 0x3:
+		stbPrint(buffer, "%Xh", argument);
+		break;
+
 	// JNZ(x) -- 0100b
 	case 0x4:
 		stbPrint(buffer, "%Xh", argument);
@@ -459,7 +562,7 @@ StringBuffer disassembly(uint16_t instruction) {
 		uint8_t bitsOp2 =  argument & 0b000000000111;
 
 		// Se o bit mais significante do operando 2 for 0, o operando em si é o 0 imediato
-		bool op2zero = (bitsOp2 & 0b100) != 0;
+		bool op2zero = (bitsOp2 & 0b100) == 0;
 
 		// Imprime em sequência OPERAÇÃO, RES, OP1, OP2
 		stbPrint(buffer, "%s, ", ARIT_OP_NAMES[bitsOpr]);
@@ -497,25 +600,30 @@ void badInstruction(Registers* r) {
 
 void fault(Registers* r) {
 	printf("\n-- Fault: Execution paused. --\n");
-	dumpRegisters(r);
-	pause();
+	emulator.breaking = true;
 }
 
-void faultMsg(Emul* emul, const char* fmt, ...) {
+void faultMsg(const char* fmt, ...) {
 	va_list args;
 	va_start(args, fmt);
+
 	printf("\n[!] Fault: ");
 	vfprintf(stdout, fmt, args);
-	dumpRegisters(emul->registers);
+
+	dumpRegisters(emulator.registers);
 	pause();
+
 	va_end(args);
 }
 
 void dumpRegisters(Registers* regs) {
 	printf("---- Program registers ----\n");
+	uint16_t psw = regs->PSW;
 	printf("PC:  0x%04hx\n", regs->PC);
 	printf("RI:  0x%04hx\n", regs->RI);
 	printf("PSW: 0x%04hx\n", regs->PSW);
+	printf("  OV=%i UN=%i ", (int)getBit(psw, 15), (int)getBit(psw, 14));
+	printf("LE=%i EQ=%i GR=%i\n", (int)getBit(psw, 13), (int)getBit(psw, 12), (int)getBit(psw, 11));
 	printf("R:   0x%04hx\n", regs->R);
 	printf("\n");
 	printf("A:   0x%04hx\n", regs->A);
@@ -526,6 +634,17 @@ void dumpRegisters(Registers* regs) {
 
 void pause() {
 	getchar();
+}
+
+void setBit(uint16_t* reg, int bit, bool value) {
+	uint16_t num = *reg;
+	num &= ~(1UL << bit);            // Clear bit first
+	num |= ((uint32_t)value) << bit; // Set bit
+	*reg = num;
+}
+
+bool getBit(uint16_t value, int bit) {
+	return (value >> bit) & 1UL;
 }
 
 // -- Funções de manipulação de StringBuffer --
