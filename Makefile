@@ -18,6 +18,9 @@ test3: ep.exe
 test4: ep.exe
 	ep img/initEPSW.mem
 
+random: ep.exe
+	ep img/random.mem
+
 ep.exe: EP1.c
 	gcc EP1.c driverEP1.c $(CFLAGS) -o ep.exe
 

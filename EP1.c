@@ -62,7 +62,6 @@ typedef struct {
 	bool breaking;
 	int stepsLeft;
 	bool breakOnFaults;
-	bool resetFlag;
 } Emul;
 
 // -- Definição de string buffer para a formatação de mensagens
@@ -73,22 +72,36 @@ typedef struct {
 	size_t capacity;
 } StringBuffer;
 
+// -- Guias de controle da interface de usuário
+typedef enum {
+	CLI_DO_NOTHING, CLI_DO_RESET, CLI_DO_QUIT
+} CliControl;
+
+typedef enum {
+	EMU_OK, EMU_HALT, EMU_FAULT
+} EmuResult;
+
 // -- Funções de interface de linha de comando
-void cliWaitUserCommand();
+CliControl cliBeforeExecute();
+CliControl cliWaitUserCommand();
 void cliInstallIntHandler();
-void cliHelp();
+void cliStepCmd();
+void cliContinueCmd();
+void cliDisassemblyCmd();
+void cliMemoryCmd();
+void cliHelpCmd();
 
 // -- Funções de execução do emulador
 void emuInitialize(uint16_t* memory, int memorySize);
 void emuReset();
 uint16_t emuFetch();
 void emuAdvance();
-int emuExecute(uint8_t opcode, uint16_t argument);
+EmuResult emuExecute(uint16_t instruction);
 void emuDoArit(uint16_t argument);
 uint16_t* emuGetRegister(uint8_t code);
 void emuFault(const char* fmt, ...);
 void emuWarn(const char* fmt, ...);
-void emuGuardAddress(uint16_t addr);
+bool emuGuardAddress(uint16_t addr);
 void emuBadInstruction();
 void emuDumpRegisters();
 void emuPrintDisassemblyLine(uint16_t address);
@@ -109,6 +122,7 @@ void pause();
 // -- Sequências de escape para as cores no console
 #if ENABLE_COLORS
 #define TERM_BOLD_RED		"\033[1;31m"
+#define TERM_BOLD_YELLOW	"\033[1;33m"
 #define TERM_BOLD_MAGENTA	"\033[1;35m"
 #define TERM_BOLD_CYAN		"\033[1;36m"
 #define TERM_BOLD_WHITE		"\033[1;37m"
@@ -118,6 +132,7 @@ void pause();
 #define TERM_RESET			"\033[0m"
 #else
 #define TERM_BOLD_RED		""
+#define TERM_BOLD_YELLOW	""
 #define TERM_BOLD_MAGENTA	""
 #define TERM_BOLD_CYAN		""
 #define TERM_BOLD_WHITE		""
@@ -185,6 +200,7 @@ static Emul emulator;
 static time_t lastInterruptBreak;
 static bool extendedNotation = false;
 
+// Entrada principal do programa
 int processa(short unsigned int* m, int memSize) {
 	printf(TERM_RESET "\n--- PROTO EMULATOR ---\n");
 	uint16_t* memory = (uint16_t*)m;
@@ -203,38 +219,28 @@ int processa(short unsigned int* m, int memSize) {
 		// Lê a instrução atual
 		uint16_t instruction = emuFetch();
 
-		// Extrai da instrução atual os 4 bits do código de operação
-		// e os bits do argumento X da instrução
-		uint8_t opcode = (regs->RI & 0xF000) >> 12;
-		uint16_t argument = (regs->RI & 0x0FFF);
-
-		// Obtém o disassembly da instrução
-		StringBuffer instructionStr = emuDisassembly(regs->RI);
-
 		// Imprime a posição, o opcode, argumento e disassembly da instrução atual
 		emuPrintDisassemblyLine(regs->PC);
 
-		// Se o emulador está em modo step-through, permita ao usuário decidir o que fazer antes
-		// de executar qualquer instrução
-		if (emulator.breaking) {
-			cliWaitUserCommand();
+		// Antes de executar a instrução, interaja com o usuário na interface
+		CliControl ctrl = cliBeforeExecute();
 
-			// Se o usuário pediu um reset, vá para o início do loop
-			if (emulator.resetFlag) {
-				emulator.resetFlag = false;
-				continue;
-			}
-		}
+		// Se o usuário pediu um reset, vá para o início do loop
+		if (ctrl == CLI_DO_RESET) continue;
 
-		// Executa a instrução com seu argumento
-		int result = emuExecute(opcode, argument);
-		if (result == 1) {
-			break;
-		}
+		// Se o usuário pediu para sair do programa, saia do loop
+		if (ctrl == CLI_DO_QUIT) break;
 
+		// Executa a instrução
+		EmuResult result = emuExecute(instruction);
+
+		// Se a instrução era um HALT, sai do loop
+		if (result == EMU_HALT) break;
+
+		// Incrementa program counter para a próxima instrução
 		emuAdvance();
 
-	// O programa para ao encontrar HLT
+	// O programa cessa ao encontrar HLT
 	} while ((regs->RI & 0xF000) != 0xF000);
 
 	printf("\nCPU Halted.\n");
@@ -242,6 +248,7 @@ int processa(short unsigned int* m, int memSize) {
 	return 0;
 }
 
+// Instala INTHandler como um monitor para o CTRL-C
 void cliInstallIntHandler() {
 	#if !FINAL_EX_MODE && INSTALL_SIGINT_HANDLER
 	printf("Press CTRL-C to break execution and start debugging.\n");
@@ -250,7 +257,29 @@ void cliInstallIntHandler() {
 	#endif
 }
 
-void cliWaitUserCommand() {
+// Essa função é chamada sempre logo antes da execução efetiva de uma instrução.
+// Se o emulador estiver em step-through, aqui haverá uma chamada para cliWaitUserCommand()
+// para que o usuário interaja com o emulador
+CliControl cliBeforeExecute() {
+	// Se o usuário pediu para executar um número x de instruções antes (comando step),
+	// não pare a execução nessa função
+	if (emulator.stepsLeft > 0) {
+		--emulator.stepsLeft;
+		return CLI_DO_NOTHING;
+	}
+
+	// Se o emulador está em modo step-through, permita ao usuário decidir o que fazer antes
+	// de efetivamente executar a instrução
+	if (emulator.breaking) {
+		CliControl ctrl = cliWaitUserCommand();
+		return ctrl;		
+	}
+
+	return CLI_DO_NOTHING;
+}
+
+// Espera o usuário digitar algum comando
+CliControl cliWaitUserCommand() {
 	const size_t BUFFER_SIZE = 128;
 	static char commandBuffer1[128] = { 0 };
 	static char commandBuffer2[128] = { 0 };
@@ -263,13 +292,6 @@ void cliWaitUserCommand() {
 		firstBreak = false;
 		printf(TERM_GREEN "You are in step-through mode. You can view memory contents, registers and disassembly.");
 		printf("\nType " TERM_YELLOW "help" TERM_GREEN " to view all commands.\n" TERM_RESET);
-	}
-
-	// Se o usuário pediu para executar um número x de instruções antes, não pare a execução
-	// nessa função
-	if (emulator.stepsLeft > 0) {
-		--emulator.stepsLeft;
-		return;
 	}
 
 	// Loop infinito apenas interrompido quando o usuário digitar um comando válido
@@ -309,124 +331,155 @@ void cliWaitUserCommand() {
 
 		// Comando step <amount>: Permite executar um número de instruções em sequência
 		if (strcmp(command, "s") == 0 || strcmp(command, "step") == 0) {
-			emulator.stepsLeft = 0;
-
-			char* amountStr = strtok(NULL, " ");
-			if (amountStr) {
-				sscanf(amountStr, "%i", &emulator.stepsLeft);
-				emulator.stepsLeft--;
-			}
-			return;
+			cliStepCmd();
+			break;
 		}
 
 		// Comando continue: Desativa o modo step-through do emulador
 		if (strcmp(command, "c") == 0 || strcmp(command, "continue") == 0) {
-			printf("Resuming execution...\n");
-			emulator.breaking = false;
-			return;	
+			cliContinueCmd();
+			break;
 		}
 
 		// Comando registers: Imprime o conteúdo de todos os registradores
 		if (strcmp(command, "r") == 0 || strcmp(command, "registers") == 0) {
 			emuDumpRegisters();
+			continue;
 		}
 
 		// Comando disassembly [address] [amount]: Imprime um número de instruções no endereço dado
 		// Se não for passado um endereço. Imprime a instrução atual
 		if (strcmp(command, "d") == 0 || strcmp(command, "disassembly") == 0) {
-			uint32_t address = emulator.registers->PC;
-			uint32_t amount = 1;
-
-			// Se for passado um endereço, o transforma em número e salva em address
-			char* addressStr = strtok(NULL, " ");
-			if (addressStr) {
-				sscanf(addressStr, "%X", &address);
-			}
-
-			// Garante que address está nos limites da memória
-			if (address >= emulator.memorySize) {
-				printf("Memory address 0x%X out of bounds (0x%X)\n", address, emulator.memorySize);
-				continue;
-			}
-
-			// Se for passado uma quantidade, a transforma em número e salva em Amount
-			char* amountStr = strtok(NULL, " ");
-			if (amountStr) {
-				sscanf(amountStr, "%X", &amount);
-			}
-
-			// Imprime as instruções linha por linha
-			for (int i = 0; i < amount; i++) {
-				emuPrintDisassemblyLine(address + i);
-			}
+			cliDisassemblyCmd();
+			continue;
 		}
 
 		// Comando memory <address> [words]: Observa a memória no ponto dado
 		if (strcmp(command, "m") == 0 || strcmp(command, "x") == 0 || strcmp(command, "memory") == 0) {
-			// Obtém em string o número do endereço
-			char* pointStr = strtok(NULL, " ");
-			if (!pointStr) {
-				printf("A source point must be passed to the memory command.\n");
-				continue;
-			}
-
-			// Transforma o endereço em número
-			int point;
-			sscanf(pointStr, "%X", &point);
-
-			if (point < 0 || point >= emulator.memorySize) {
-				printf("Memory address 0x%X out of bounds (0x%X)\n", point, emulator.memorySize);
-				continue;
-			}
-
-			// Obtém o número de palavras a observar, se o usuário passar esse argumento
-			int words = 8;
-			char* wordsStr = strtok(NULL, " ");
-			if (wordsStr) {
-				sscanf(wordsStr, "%X", &words);
-			}
-
-			// Imprime as palavras
-			for (int i = 0; i < words; i++) {
-				if (i % 8 == 0) {
-					printf(TERM_BOLD_WHITE "\n[%3Xh] " TERM_RESET, point);
-				}
-				printf("%04X ", emulator.memory[point]);
-				point++;
-			}
-
-			printf("\n");
+			cliMemoryCmd();
+			continue;
 		}
 
+		// Comando quit: Sai do emulador
+		if (strcmp(command, "q") == 0 || strcmp(command, "quit") == 0) {
+			return CLI_DO_QUIT;
+		}
+
+		// Comando reset: Reinicia o emulador com a memória original e os registradores em 0
 		if (strcmp(command, "reset") == 0) {
 			emuReset();
-			emulator.resetFlag = true;
-			return;
+			return CLI_DO_RESET;
 		}
 
 		// Comando nobreak: Desabilita a parada do emulator no lançamento de falhas
 		if (strcmp(command, "nobreak") == 0) {
 			emulator.breakOnFaults = false;
+			continue;
 		}
 
 		// Comando dobreak: Rehabilita a parada do emulator no lançamento de falhas
 		if (strcmp(command, "dobreak") == 0) {
 			emulator.breakOnFaults = true;
-		}
-
-		// Comando quit: Sai do emulador
-		if (strcmp(command, "q") == 0 || strcmp(command, "quit") == 0) {
-			exit(0);
+			continue;
 		}
 
 		// Comando help: Imprime a ajuda do programa
 		if (strcmp(command, "help") == 0) {
-			cliHelp();
+			cliHelpCmd();
+			continue;
 		}
+
+		printf(TERM_BOLD_RED "Unknown command '%s'. Type 'help' for a list of commands.\n" TERM_RESET, command);
+	}
+
+	return CLI_DO_NOTHING;
+}
+
+void cliContinueCmd() {
+	printf("Resuming execution...\n");
+	emulator.breaking = false;
+}
+
+void cliStepCmd() {
+	emulator.stepsLeft = 0;
+
+	char* amountStr = strtok(NULL, " ");
+	if (amountStr) {
+		sscanf(amountStr, "%i", &emulator.stepsLeft);
+		emulator.stepsLeft--;
 	}
 }
 
-void cliHelp() {
+void cliDisassemblyCmd() {
+	uint32_t address = emulator.registers->PC;
+	uint32_t amount = 1;
+
+	// Se for passado um endereço, o transforma em número e salva em address
+	char* addressStr = strtok(NULL, " ");
+	if (addressStr) {
+		sscanf(addressStr, "%X", &address);
+	}
+
+	// Garante que address está nos limites da memória
+	if (address >= emulator.memorySize) {
+		printf("Memory address 0x%X out of bounds (0x%X)\n", address, emulator.memorySize);
+		return;
+	}
+
+	// Se for passado uma quantidade, a transforma em número e salva em Amount
+	char* amountStr = strtok(NULL, " ");
+	if (amountStr) {
+		sscanf(amountStr, "%X", &amount);
+	}
+
+	// Imprime as instruções linha por linha
+	for (int i = 0; i < amount; i++) {
+		emuPrintDisassemblyLine(address + i);
+	}
+}
+
+void cliMemoryCmd() {
+	// Obtém em string o número do endereço
+	char* pointStr = strtok(NULL, " ");
+	if (!pointStr) {
+		printf("A source point must be passed to the memory command.\n");
+		return;
+	}
+
+	// Transforma o endereço em número
+	int point;
+	sscanf(pointStr, "%x", &point);
+	if (point < 0) {
+		printf(TERM_BOLD_RED "Address must not be negative.\n" TERM_RESET);
+		return;
+	}
+
+	// Obtém o número de palavras a observar, se o usuário passar esse argumento
+	int words = 8;
+	char* wordsStr = strtok(NULL, " ");
+	if (wordsStr) {
+		sscanf(wordsStr, "%X", &words);
+	}
+
+	// Imprime as palavras
+	for (uint16_t i = 0; i < words; i++) {
+		uint16_t addr = point + i;
+		if (addr >= emulator.memorySize) {
+			printf(TERM_BOLD_RED "Memory address 0x%X out of bounds (0x%X)\n" TERM_RESET, addr, emulator.memorySize);
+			return;
+		}
+
+		if (i % 8 == 0) {
+			printf(TERM_BOLD_WHITE "\n[%3Xh] " TERM_RESET, addr);
+		}
+		printf("%04X ", emulator.memory[addr]);
+		addr++;
+	}
+
+	printf("\n");
+}
+
+void cliHelpCmd() {
 	printf("Pressing CTRL-C at any time will interrupt emulation.\nPressing it in quick succession will quit the emulator entirely.\n");
 	printf("\nhelp: prints this help guide.\n");
 	printf("\nquit, q: quits out of the emulator.\n");
@@ -448,8 +501,6 @@ void emuInitialize(uint16_t* memory, int memSize) {
 	emulator.stepsLeft = 0;
 	emulator.breaking = false;
 	emulator.breakOnFaults = false;
-	emulator.resetFlag = false;
-
 	emulator.snapshot = (uint16_t*)malloc(memSize * sizeof(uint16_t));
 	memcpy(emulator.snapshot, memory, memSize * sizeof(uint16_t));
 
@@ -513,9 +564,14 @@ void emuAdvance() {
 	}
 }
 
-int emuExecute(uint8_t opcode, uint16_t argument) {
+EmuResult emuExecute(uint16_t instruction) {
 	Registers* regs = emulator.registers;
 	uint16_t* memory = emulator.memory;
+
+	// Extrai da instrução os 4 bits do código de operação
+	// e os bits do argumento X da instrução
+	uint8_t opcode = (instruction & 0xF000) >> 12;
+	uint16_t argument = (instruction & 0x0FFF);
 
 	switch(opcode) {
 	// NOP -- Opcode (0000)b
@@ -527,7 +583,7 @@ int emuExecute(uint8_t opcode, uint16_t argument) {
 	// Carrega o acumulador (A) com o conteúdo da memória em X
 	case 0x1: {
 		// Garante a validade do endereço de memória X
-		emuGuardAddress(argument);
+		if (emuGuardAddress(argument)) return EMU_FAULT;
 
 		regs->A = memory[argument];
 		break;
@@ -537,7 +593,7 @@ int emuExecute(uint8_t opcode, uint16_t argument) {
 	// Armazena no endereço imediato X o valor do acumulador A
 	case 0x2: {
 		// Garante a validade do endereço de memória X
-		emuGuardAddress(argument);
+		if (emuGuardAddress(argument)) return EMU_FAULT;
 
 		memory[argument] = regs->A;
 		break;
@@ -547,7 +603,7 @@ int emuExecute(uint8_t opcode, uint16_t argument) {
 	// Pula incondicionalmente para o endereço imediato X
 	case 0x3: {
 		// Garante que o destino X de salto é válido
-		emuGuardAddress(argument);
+		if (emuGuardAddress(argument)) return EMU_FAULT;
 
 		// Salva R como o endereço da próxima instrução
 		regs->R = regs->PC + 1;
@@ -563,7 +619,7 @@ int emuExecute(uint8_t opcode, uint16_t argument) {
 	// o endereço especificado no argumento X
 	case 0x4: {
 		// Garante que o destino X de salto é válido
-		emuGuardAddress(argument);
+		if (emuGuardAddress(argument)) return EMU_FAULT;
 
 		if (regs->A != 0) {
 			// Salva R como o endereço da próxima instrução
@@ -580,7 +636,7 @@ int emuExecute(uint8_t opcode, uint16_t argument) {
 	// RET -- Opcode (0101b)
 	case 0x5: {
 		// Garante que o endereço de retorno será válido
-		emuGuardAddress(regs->R);
+		if (emuGuardAddress(regs->R)) return EMU_FAULT;
 
 		// Salva o contador de programa atual. O contador passará a ser o endereço em R,
 		// e R passará a ser o endereço da instrução depois dessa
@@ -592,24 +648,22 @@ int emuExecute(uint8_t opcode, uint16_t argument) {
 
 	// ARIT(x) -- Opcode (0110)b
 	// Executa uma operação aritmética.
-	case 0x6: {
+	case 0x6:
 		emuDoArit(argument);
 		break;
-	}
 
 	// HLT - Opcode (1111)b
 	// Interrompe a execução do processador
 	case 0xF:
-		return 1;
+		return EMU_HALT;
 
 	// Instrução desconhecida
-	default: {
+	default:
 		emuBadInstruction();	
-		break;
-	}
+		return EMU_FAULT;
 	}
 
-	return 0;
+	return EMU_OK;
 }
 
 void emuDoArit(uint16_t argument) {
@@ -690,14 +744,14 @@ void emuDoArit(uint16_t argument) {
 		bool overflowed = sum > 0xFFFF;
 		setBit(PSW, 15, overflowed);
 		break;
-	/*case 7:
+	case 7:
 		// Salva a subtração truncada no registrador
 		*regDst = op1 - op2;
 
 		// Seta o bit de underflow (bit 14) se a subtração transborda
 		bool underflowed = op2 > op1;
-		setBit(PSW, 14, overflowed);
-		break;*/
+		setBit(PSW, 14, underflowed);
+		break;
 	default:
 		emuFault("Unimplemented arit operation %i\n", (int)bitsOpr);
 		break;
@@ -799,14 +853,15 @@ StringBuffer emuDisassembly(uint16_t instruction) {
 		// Se o bit mais significante do operando 2 for 0, o operando em si é o 0 imediato
 		bool op2zero = (bitsOp2 & 0b100) == 0;
 
-		// Imprime em sequência OPERAÇÃO, RES, OP1, OP2
 		if (extendedNotation) {
+			// Imprime RES = OP1 * OP2
 			stbPrint(buffer, ARIT_EXT_FMT[bitsOpr],
 				REGISTER_NAMES[bitsDst],
 				REGISTER_NAMES[bitsOp1],
 				(op2zero) ? "0" : REGISTER_NAMES[bitsOp2 & 0b011]
 			);
 		} else {
+			// Imprime em sequência OPERAÇÃO, RES, OP1, OP2
 			stbPrint(buffer, "%s, ", ARIT_OP_NAMES[bitsOpr]);
 			stbPrint(buffer, "%s, ", REGISTER_NAMES[bitsDst]);
 			stbPrint(buffer, "%s, ", REGISTER_NAMES[bitsOp1]);
@@ -828,12 +883,16 @@ StringBuffer emuDisassembly(uint16_t instruction) {
 }
 
 // Verifica se um enderço se memória está dentro dos limites possíveis do tamanho da memória
-// do emulador. Se o endereço estiver fora do limite, causa uma falha.
-void emuGuardAddress(uint16_t addr) {
+// do emulador. Se o endereço estiver fora do limite, causa uma falha e retorna true.
+bool emuGuardAddress(uint16_t addr) {
 	if (addr >= emulator.memorySize) {
 		uint32_t PC = emulator.registers->PC;
+
 		emuFault("Memory access out of bounds 0x%04X at 0x%03X", addr, PC);
+		return true;
 	}
+
+	return false;
 }
 
 void emuBadInstruction() {
@@ -846,7 +905,7 @@ void emuFault(const char* fmt, ...) {
 	va_list args;
 	va_start(args, fmt);
 
-	printf("\033[1;31m[ERR!] CPU FAULT: \033[0m");
+	printf(TERM_BOLD_RED "[ERR!] CPU FAULT: " TERM_RESET);
 	vfprintf(stdout, fmt, args);
 	printf("\n\n");
 
@@ -864,7 +923,7 @@ void emuWarn(const char* fmt, ...) {
 	va_list args;
 	va_start(args, fmt);
 
-	printf("\033[1;33m[WRN!] \033[0m");
+	printf(TERM_BOLD_YELLOW "[WRN!] " TERM_RESET);
 	vfprintf(stdout, fmt, args);
 	printf("\n\n");
 
@@ -890,21 +949,30 @@ void emuDumpRegisters() {
 
 // -- Handler de SIGINT (interrupção pelo CTRL-C) --
 void INTHandler(int sign) {
+	static bool interruptedBefore = false;
+
+	// Remove all console colors
 	printf(TERM_RESET " ");
 
+	// Retransmit signal
 	signal(sign, SIG_IGN);
 
-	if (difftime(time(NULL), lastInterruptBreak) < 1.5) {
+	// If ctrl-c was pressed before and within a certain time threshold, exit the application
+	if (difftime(time(NULL), lastInterruptBreak) < 1.5 && interruptedBefore) {
 		exit(0);
 	}
 
+	// Save last time ctrl-c was pressed
+	interruptedBefore = true;
 	time(&lastInterruptBreak);
 
 	printf("\n-- Ctrl-C pressed. Breaking execution.\n");
 
+	// Put the emulator in breaking mode
 	emulator.stepsLeft = 0;
 	emulator.breaking = true;
 
+	// Reset signal handler
 	signal(SIGINT, INTHandler);
 }
 
