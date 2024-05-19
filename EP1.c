@@ -3,14 +3,28 @@
 #include <stdint.h>
 #include <stdarg.h>
 #include <stdbool.h>
-#include <stdlib.h>
 #include <signal.h>
 #include <ctype.h>
 #include <time.h>
+#include <stdlib.h>
 
+// Se configurado como 1, desativa os recursos interativos do emulador
+#define FINAL_EX_MODE 0
+
+// Se configurado, interrompe o emulador logo antes de executar a primeira instrução
 #define START_IN_BREAKING_MODE 1
 
-extern char* HELP_MSG;
+// Quando configurado, intercepta CTRL-C para interromper a execução do emulador
+#define INSTALL_SIGINT_HANDLER 1
+
+// Se configurado, por padrão interromperá a execução quando houver uma fault
+#define BREAK_AT_FAULTS 1
+
+// Configura se a notação extendida ou padrão será usada nos disassemblys
+#define DEFAULT_EXTENDED_NOTATION 1
+
+// Configura se o loop na memória é uma fault ou apenas um warning
+#define FAULT_ON_LOOP_AROUND 1
 
 // Definição dos registradores do processador
 typedef struct {
@@ -28,9 +42,12 @@ typedef struct {
 typedef struct {
 	Registers* registers;
 	uint16_t* memory;
-	uint16_t memorySize;
+	uint16_t* snapshot;
+	int memorySize;
 	bool breaking;
 	int stepsLeft;
+	bool breakOnFaults;
+	bool resetFlag;
 } Emul;
 
 // Definição de string buffer para a formatação de mensagens
@@ -43,13 +60,19 @@ typedef struct {
 
 // Funções de interface de linha de comando
 void cliWaitUserCommand();
+void cliInstallIntHandler();
 void cliHelp();
 
 // Funções de execução do emulador
+void emuInitialize(uint16_t* memory, int memorySize);
+void emuReset();
+uint16_t emuFetch();
+void emuAdvance();
 int emuExecute(uint8_t opcode, uint16_t argument);
 void emuDoArit(uint16_t argument);
 uint16_t* emuGetRegister(uint8_t code);
 void emuFault(const char* fmt, ...);
+void emuWarn(const char* fmt, ...);
 void emuGuardAddress(uint16_t addr);
 void emuBadInstruction();
 void emuDumpRegisters();
@@ -109,90 +132,103 @@ static const char* const ARIT_OP_NAMES[] = {
 	"SUB"   // 111b
 };
 
+static const char* const ARIT_EXT_FMT[] = {
+	"%s = 0",		 // 000b
+	"%s = FFFF",	 // 001b
+	"%s = ~%s",		 // 010b
+	"%s = %s & %s",  // 011b
+	"%s = %s | %s",  // 100b
+	"%s = %s ^ %s",  // 101b
+	"%s = %s + %s",  // 110b
+	"%s = %s - %s"   // 111b
+};
+
 // Estrutura global de emulação
 static Emul emulator;
 static time_t lastInterruptBreak;
+static bool extendedNotation = false;
 
-int processa (short unsigned int* m, int memSize) {
+int processa(short unsigned int* m, int memSize) {
+	printf("\n--- PROTO EMULATOR ---\n");
 	uint16_t* memory = (uint16_t*)m;
 
-	// Inicialização dos registradores
-	Registers r;
-	r.RI = 0;
-	r.PC = 0;
-	r.A = 0;
-	r.B = 0;
-	r.C = 0;
-	r.D = 0;
-	r.R = 0;
-	r.PSW = 0;
+	// Configura um handler para o CTRL-C 
+	cliInstallIntHandler();
 
 	// Estrutura do emulador
-	emulator.memory = memory;
-	emulator.memorySize = memSize;
-	emulator.registers = &r;
-	emulator.breaking = START_IN_BREAKING_MODE;
-	emulator.stepsLeft = 0;
-
-	time(&lastInterruptBreak);
-	signal(SIGINT, INTHandler);
-
-	printf("\n--- PROTO EMULATOR ---\n");
+	emuInitialize(memory, memSize);
+	
 	printf("Memory size: 0x%X words.\n", memSize);
-	printf("Press CTRL-C to break execution and start debugging.\n");
-
 	printf("Beginning execution...\n");
+
+	Registers* regs = emulator.registers;
 	do {
 		// Lê a instrução atual
-		r.RI = memory[r.PC];	
+		uint16_t instruction = emuFetch();
 
 		// Extrai da instrução atual os 4 bits do código de operação
-		uint8_t opcode = (r.RI & 0xF000) >> 12;
+		// e os bits do argumento X da instrução
+		uint8_t opcode = (regs->RI & 0xF000) >> 12;
+		uint16_t argument = (regs->RI & 0x0FFF);
 
-		// Extrai o argumento X da instrução, usado nas operações LDA, STA, JMP e JNZ
-		uint16_t argument = (r.RI & 0x0FFF);
+		// Obtém o disassembly da instrução
+		StringBuffer instructionStr = emuDisassembly(regs->RI);
 
-		// Imprime a posição e o código da instrução atual
-		printf("[%3Xh] %X.%03X: ", r.PC, opcode, argument);
+		// Imprime a posição, o opcode, argumento e disassembly da instrução atual
+		printf("[%3Xh] %X.%03X: %s\n", regs->PC, opcode, argument, instructionStr.buffer);
 
-		// Imprime o disassembly da instrução
-		StringBuffer instructionStr = emuDisassembly(r.RI);
-		printf("%s\n", instructionStr.buffer);
 		stbFree(&instructionStr);
 
 		// Se o emulador está em modo step-through, permita ao usuário decidir o que fazer antes
 		// de executar qualquer instrução
 		if (emulator.breaking) {
 			cliWaitUserCommand();
+
+			// Se o usuário pediu um reset, vá para o início do loop
+			if (emulator.resetFlag) {
+				emulator.resetFlag = false;
+				continue;
+			}
 		}
 
-		// Executa a instrução com seu argumento opcional
+		// Executa a instrução com seu argumento
 		int result = emuExecute(opcode, argument);
 		if (result == 1) {
 			break;
 		}
 
-		// Incrementa o ponteiro para a próxima instrução
-		r.PC++;
-
-		// Se o contador de programa ultrapassou o limite da memória, reinicie-o em 0.
-		if (r.PC >= memSize) r.PC = 0;
+		emuAdvance();
 
 	// O programa para ao encontrar HLT
-	} while ((r.RI & 0xF000) != 0xF000);
+	} while ((regs->RI & 0xF000) != 0xF000);
 
 	printf("\nCPU Halted.\n");
 
 	return 0;
 }
 
+void cliInstallIntHandler() {
+	#if !FINAL_EX_MODE && INSTALL_SIGINT_HANDLER
+	printf("Press CTRL-C to break execution and start debugging.\n");
+	time(&lastInterruptBreak);
+	signal(SIGINT, INTHandler);
+	#endif
+}
+
 void cliWaitUserCommand() {
 	const size_t BUFFER_SIZE = 128;
 	static char commandBuffer1[128] = { 0 };
 	static char commandBuffer2[128] = { 0 };
+	static bool firstBreak = true;
 
 	static char* commandBuffer = commandBuffer1;
 	static char* lastCommand = commandBuffer2;
+
+	if (firstBreak) {
+		firstBreak = false;
+		printf("You are in step-through mode. You can view memory contents, registers and disassembly.\nType help to view all commands.\n");
+		
+	}
 
 	// Se o usuário pediu para executar um número x de instruções antes, não pare a execução
 	// nessa função
@@ -203,7 +239,7 @@ void cliWaitUserCommand() {
 
 	// Loop infinito apenas interrompido quando o usuário digitar um comando válido
 	while (true) {	
-		printf(" >> ");
+		printf(">> ");
 		
 		// Lê uma linha de comando		
 		fgets(commandBuffer, BUFFER_SIZE, stdin);
@@ -217,7 +253,7 @@ void cliWaitUserCommand() {
 		}
 
 		// Se a linha digitada for completamente vazia, o usuário apenas apertou enter e o comando
-		// anterior será executado novamente
+		// anterior deve ser executado novamente
 		char cmdLine[BUFFER_SIZE];
 		if (commandBuffer[0] == '\0') {
 			strncpy(cmdLine, lastCommand, BUFFER_SIZE);
@@ -234,7 +270,7 @@ void cliWaitUserCommand() {
 
 		// Obtém o comando principal antes do espaço
 		char* command = strtok(cmdLine, " ");
-		//toLowerCase(command);
+		toLowerCase(command);
 
 		// Comando step <amount>: Permite executar um número de instruções em sequência
 		if (strcmp(command, "s") == 0 || strcmp(command, "step") == 0) {
@@ -334,6 +370,28 @@ void cliWaitUserCommand() {
 			printf("\n");
 		}
 
+		if (strcmp(command, "reset") == 0) {
+			emuReset();
+			emulator.resetFlag = true;
+			return;
+		}
+
+		// Comando nobreak: Desabilita a parada do emulator no lançamento de falhas
+		if (strcmp(command, "nobreak") == 0) {
+			emulator.breakOnFaults = false;
+		}
+
+		// Comando dobreak: Rehabilita a parada do emulator no lançamento de falhas
+		if (strcmp(command, "dobreak") == 0) {
+			emulator.breakOnFaults = true;
+		}
+
+		// Comando quit: Sai do emulador
+		if (strcmp(command, "q") == 0 || strcmp(command, "quit") == 0) {
+			exit(0);
+		}
+
+		// Comando help: Imprime a ajuda do programa
 		if (strcmp(command, "help") == 0) {
 			cliHelp();
 		}
@@ -343,12 +401,88 @@ void cliWaitUserCommand() {
 void cliHelp() {
 	printf("Pressing CTRL-C at any time will interrupt emulation.\nPressing it in quick succession will quit the emulator entirely.\n");
 	printf("\nhelp: prints this help guide.\n");
-	printf("\ncontinue, c:\n\tLeaves step-through mode and lets the emulator run freely.\n\tExecution will be stopped upon encountering a fault or the user\n\tpressing CTRL-C.\n");
-	printf("\nregisters, r: \n\tView the contents of all CPU registers.\n");
-	printf("\nstep, s <amount>:\n\tSteps through <amount> of instructions and no further.\n");
-	printf("\nmemory, m, x <address> [words]:\n\tViews the contents of the emulator memory at the given address with an\n\toptional amount of words to display.\n");
-	printf("\ndisassembly, d [address] [amount]:\n\tDisassembles the given amount of instructions at the address specified.\n\tIf no address is specified, prints the current instruction.\n");
-	
+	printf("\nquit, q: quits out of the emulator.\n");
+	printf("\nstep, s <amount>:\n    Steps through <amount> of instructions and no further.\n");
+	printf("\ncontinue, c:\n    Leaves step-through mode and lets the emulator run freely.\n    Execution will be stopped upon encountering a fault or the user\n    pressing CTRL-C.\n");
+	printf("\nreset:\n    Resets the memory state as it were in the beginning of the emulation\n    and clears all registers.\n");
+	printf("\nregisters, r: \n    View the contents of all CPU registers.\n");
+	printf("\nmemory, m, x <address> [words]:\n    Views the contents of the emulator memory at the given address with an\n    optional amount of words to display.\n");
+	printf("\ndisassembly, d [address] [amount]:\n    Disassembles the given amount of instructions at the address specified.\n    If no address is specified, prints the current instruction.\n");
+	printf("\nnobreak: disables emulator pauses on cpu faults.\n");
+	printf("\ndobreak: reenables emulator pauses on cpu faults.\n");
+}
+
+void emuInitialize(uint16_t* memory, int memSize) {
+	// Estrutura do emulador
+	emulator.memory = memory;
+	emulator.memorySize = memSize;
+	emulator.registers = (Registers*)malloc(sizeof(Registers));
+	emulator.stepsLeft = 0;
+	emulator.breaking = false;
+	emulator.breakOnFaults = false;
+	emulator.resetFlag = false;
+
+	emulator.snapshot = (uint16_t*)malloc(memSize * sizeof(uint16_t));
+	memcpy(emulator.snapshot, memory, memSize * sizeof(uint16_t));
+
+	// Se configurado para tal, começa o emulador já no modo step-through
+	#if !FINAL_EX_MODE && START_IN_BREAKING_MODE
+	emulator.breaking = true;
+	#endif
+
+	#if !FINAL_EX_MODE && DEFAULT_EXTENDED_NOTATION
+	extendedNotation = true;
+	#endif
+
+	// Se configurado como tal pelas flags, para o emulador se alguma fault for lançada
+	#if !FINAL_EX_MODE && BREAK_AT_FAULTS
+	emulator.breakOnFaults = true;
+	#endif
+
+	emuReset();
+}
+
+void emuReset() {
+	// Inicializa para 0 todos os registradores
+	Registers* regs = emulator.registers;
+	regs->RI = 0;
+	regs->PC = 0;
+	regs->A = 0;
+	regs->B = 0;
+	regs->C = 0;
+	regs->D = 0;
+	regs->R = 0;
+	regs->PSW = 0;
+
+	// Copia a memória inicial do programa para a memória principal
+	memcpy(emulator.memory, emulator.snapshot, emulator.memorySize * 2);
+}
+
+uint16_t emuFetch() {
+	Registers* regs = emulator.registers;
+
+	// Lê da memória o valor em Program Counter e salva no registrador de instrução atual
+	uint16_t instruction = emulator.memory[regs->PC];
+	regs->RI = instruction;	
+	return instruction;
+}
+
+void emuAdvance() {
+	Registers* regs = emulator.registers;
+
+	// Incrementa o ponteiro para a próxima instrução
+	regs->PC++;
+
+	// Se o contador de programa ultrapassou o limite da memória, reinicie-o em 0.
+	if (regs->PC >= emulator.memorySize) { 
+		#if FAULT_ON_LOOP_AROUND
+		emuFault("Program counter looped around to 0. Was program control lost?");
+		#else
+		emuWarn("Program counter looped around to 0. Was program control lost?");
+		#endif
+
+		regs->PC = 0;
+	}
 }
 
 int emuExecute(uint8_t opcode, uint16_t argument) {
@@ -412,6 +546,19 @@ int emuExecute(uint8_t opcode, uint16_t argument) {
 			regs->PC = argument - 1;
 		}
 
+		break;
+	}
+
+	// RET -- Opcode (0101b)
+	case 0x5: {
+		// Garante que o endereço de retorno será válido
+		emuGuardAddress(regs->R);
+
+		// Salva o contador de programa atual. O contador passará a ser o endereço em R,
+		// e R passará a ser o endereço da instrução depois dessa
+		uint16_t pc = regs->PC;
+		regs->PC = regs->R;
+		regs->R = pc + 1;
 		break;
 	}
 
@@ -611,10 +758,18 @@ StringBuffer emuDisassembly(uint16_t instruction) {
 		bool op2zero = (bitsOp2 & 0b100) == 0;
 
 		// Imprime em sequência OPERAÇÃO, RES, OP1, OP2
-		stbPrint(buffer, "%s, ", ARIT_OP_NAMES[bitsOpr]);
-		stbPrint(buffer, "%s, ", REGISTER_NAMES[bitsDst]);
-		stbPrint(buffer, "%s, ", REGISTER_NAMES[bitsOp1]);
-		stbPrint(buffer, "%s ", (op2zero) ? "zero" : REGISTER_NAMES[bitsOp2 & 0b011]);
+		if (extendedNotation) {
+			stbPrint(buffer, ARIT_EXT_FMT[bitsOpr],
+				REGISTER_NAMES[bitsDst],
+				REGISTER_NAMES[bitsOp1],
+				(op2zero) ? "0" : REGISTER_NAMES[bitsOp2 & 0b011]
+			);
+		} else {
+			stbPrint(buffer, "%s, ", ARIT_OP_NAMES[bitsOpr]);
+			stbPrint(buffer, "%s, ", REGISTER_NAMES[bitsDst]);
+			stbPrint(buffer, "%s, ", REGISTER_NAMES[bitsOp1]);
+			stbPrint(buffer, "%s ", (op2zero) ? "zero" : REGISTER_NAMES[bitsOp2 & 0b011]);
+		}
 		break;
 
 	// HLT - 1111b
@@ -623,7 +778,7 @@ StringBuffer emuDisassembly(uint16_t instruction) {
 
 	// Instrução desconhecida
 	default:
-		stbPrint(buffer, " ??? 0x%X : 0x%X\n", opcode, argument);
+		stbPrint(buffer, ":: %X.%03X", opcode, argument);
 		break;
 	}
 
@@ -634,26 +789,42 @@ StringBuffer emuDisassembly(uint16_t instruction) {
 // do emulador. Se o endereço estiver fora do limite, causa uma falha.
 void emuGuardAddress(uint16_t addr) {
 	if (addr >= emulator.memorySize) {
-		emuFault("Memory access out of bounds (%x)\n", addr);
+		uint32_t PC = emulator.registers->PC;
+		emuFault("Memory access out of bounds 0x%04X at 0x%03X", addr, PC);
 	}
 }
 
 void emuBadInstruction() {
 	uint32_t RI = emulator.registers->RI;
 	uint32_t PC = emulator.registers->PC;
-	emuFault("Bad instruction 0x%X at 0x%X --\n", RI, PC);
+	emuFault("Bad instruction 0x%04X at 0x%03X", RI, PC);
 }
 
 void emuFault(const char* fmt, ...) {
 	va_list args;
 	va_start(args, fmt);
 
-	printf("\n[!!] FAULT: ");
+	printf("\033[1;31m[ERR!] CPU FAULT: \033[0m");
 	vfprintf(stdout, fmt, args);
+	printf("\n\n");
 
-	// Coloca o emulador em modo step-through e interrompe qualquer sequência de steps se havia uma
-	emulator.breaking = true;
-	emulator.stepsLeft = 0;
+	// Coloca o emulador em modo step-through e interrompe qualquer sequência de steps se havia
+	// alguma antes
+	if (emulator.breakOnFaults) {
+		emulator.breaking = true;
+		emulator.stepsLeft = 0;
+	}
+
+	va_end(args);
+}
+
+void emuWarn(const char* fmt, ...) {
+	va_list args;
+	va_start(args, fmt);
+
+	printf("\033[1;33m[WRN!] \033[0m");
+	vfprintf(stdout, fmt, args);
+	printf("\n\n");
 
 	va_end(args);
 }
@@ -708,7 +879,7 @@ bool getBit(uint16_t value, int bit) {
 }
 
 void toLowerCase(char* str) {
-	while (str) {
+	while (*str) {
 		*str = tolower(*str);
 		str++;
 	}
