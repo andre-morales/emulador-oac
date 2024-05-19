@@ -1,3 +1,13 @@
+/**
+ * Emulador interativo para o processador protótipo de 16 bits do professor Fábio Nakano.
+ * 
+ * Esse programa visa ir além do exercício-programa 1 e implementa um emulador e depurador completo
+ * para a arquitetura especificada pelo professor.
+ * 
+ * Autor: André Morales
+ * Criação: 17/05/2024
+ * Modificação: 19/05/204
+ * */
 #include "driverEP1.h"
 #include <stdio.h>
 #include <stdint.h>
@@ -8,8 +18,13 @@
 #include <time.h>
 #include <stdlib.h>
 
-// Se configurado como 1, desativa os recursos interativos do emulador
+// Se configurado como 1, desativa todos os recursos interativos do emulador e o coloca em um modo
+// de "apenas execução". Esse modo é usado em testes automatizados. 
 #define FINAL_EX_MODE 0
+
+// Configura se cores serão usadas ou não no console. Desative se estiver tendo problemas com
+// terminais antigos
+#define ENABLE_COLORS 1
 
 // Se configurado, interrompe o emulador logo antes de executar a primeira instrução
 #define START_IN_BREAKING_MODE 1
@@ -20,13 +35,13 @@
 // Se configurado, por padrão interromperá a execução quando houver uma fault
 #define BREAK_AT_FAULTS 1
 
-// Configura se a notação extendida ou padrão será usada nos disassemblys
+// Configura se a notação extendida ou padrão será usada nos disassemblies
 #define DEFAULT_EXTENDED_NOTATION 1
 
-// Configura se o loop na memória é uma fault ou apenas um warning
+// Configura se a ocorrência loop-around na memória é uma fault ou apenas um warning
 #define FAULT_ON_LOOP_AROUND 1
 
-// Definição dos registradores do processador
+// -- Definição dos registradores do processador
 typedef struct {
 	uint16_t RI;
 	uint16_t PC;
@@ -38,7 +53,7 @@ typedef struct {
 	uint16_t PSW;
 } Registers;
 
-// Definição da estrutura do emulador
+// -- Definição da estrutura do emulador
 typedef struct {
 	Registers* registers;
 	uint16_t* memory;
@@ -50,7 +65,7 @@ typedef struct {
 	bool resetFlag;
 } Emul;
 
-// Definição de string buffer para a formatação de mensagens
+// -- Definição de string buffer para a formatação de mensagens
 typedef struct {
 	char* buffer;
 	size_t position;
@@ -58,12 +73,12 @@ typedef struct {
 	size_t capacity;
 } StringBuffer;
 
-// Funções de interface de linha de comando
+// -- Funções de interface de linha de comando
 void cliWaitUserCommand();
 void cliInstallIntHandler();
 void cliHelp();
 
-// Funções de execução do emulador
+// -- Funções de execução do emulador
 void emuInitialize(uint16_t* memory, int memorySize);
 void emuReset();
 uint16_t emuFetch();
@@ -76,21 +91,43 @@ void emuWarn(const char* fmt, ...);
 void emuGuardAddress(uint16_t addr);
 void emuBadInstruction();
 void emuDumpRegisters();
+void emuPrintDisassemblyLine(uint16_t address);
 StringBuffer emuDisassembly(uint16_t instruction);
 
-// Funções auxiliares de manipulação de strings
+// -- Funções auxiliares de manipulação de strings
 void stbInit(StringBuffer*);
 bool stbPrint(StringBuffer*, const char* fmt, ...);
 void stbFree(StringBuffer*); 
 
-// Funções auxiliares genéricas
+// -- Funções auxiliares genéricas
 void INTHandler(int sign);
 void setBit(uint16_t* reg, int bit, bool value);
 bool getBit(uint16_t value, int bit);
 void toLowerCase(char* str);
 void pause();
 
-// Tabelas estáticas
+// -- Sequências de escape para as cores no console
+#if ENABLE_COLORS
+#define TERM_BOLD_RED		"\033[1;31m"
+#define TERM_BOLD_MAGENTA	"\033[1;35m"
+#define TERM_BOLD_CYAN		"\033[1;36m"
+#define TERM_BOLD_WHITE		"\033[1;37m"
+#define TERM_GREEN			"\033[32m"
+#define TERM_YELLOW			"\033[33m"
+#define TERM_CYAN			"\033[36m"
+#define TERM_RESET			"\033[0m"
+#else
+#define TERM_BOLD_RED		""
+#define TERM_BOLD_MAGENTA	""
+#define TERM_BOLD_CYAN		""
+#define TERM_BOLD_WHITE		""
+#define TERM_GREEN			""
+#define TERM_YELLOW			""
+#define TERM_CYAN			""
+#define TERM_RESET			""
+#endif
+
+// -- Tabelas estáticas
 static const char* const INSTRUCTION_NAMES[] = {
 	"NOP",  // 0000b
 	"LDA",  // 0001b
@@ -143,13 +180,13 @@ static const char* const ARIT_EXT_FMT[] = {
 	"%s = %s - %s"   // 111b
 };
 
-// Estrutura global de emulação
+// -- Estrutura global de emulação
 static Emul emulator;
 static time_t lastInterruptBreak;
 static bool extendedNotation = false;
 
 int processa(short unsigned int* m, int memSize) {
-	printf("\n--- PROTO EMULATOR ---\n");
+	printf(TERM_RESET "\n--- PROTO EMULATOR ---\n");
 	uint16_t* memory = (uint16_t*)m;
 
 	// Configura um handler para o CTRL-C 
@@ -175,9 +212,7 @@ int processa(short unsigned int* m, int memSize) {
 		StringBuffer instructionStr = emuDisassembly(regs->RI);
 
 		// Imprime a posição, o opcode, argumento e disassembly da instrução atual
-		printf("[%3Xh] %X.%03X: %s\n", regs->PC, opcode, argument, instructionStr.buffer);
-
-		stbFree(&instructionStr);
+		emuPrintDisassemblyLine(regs->PC);
 
 		// Se o emulador está em modo step-through, permita ao usuário decidir o que fazer antes
 		// de executar qualquer instrução
@@ -226,8 +261,8 @@ void cliWaitUserCommand() {
 
 	if (firstBreak) {
 		firstBreak = false;
-		printf("You are in step-through mode. You can view memory contents, registers and disassembly.\nType help to view all commands.\n");
-		
+		printf(TERM_GREEN "You are in step-through mode. You can view memory contents, registers and disassembly.");
+		printf("\nType " TERM_YELLOW "help" TERM_GREEN " to view all commands.\n" TERM_RESET);
 	}
 
 	// Se o usuário pediu para executar um número x de instruções antes, não pare a execução
@@ -239,10 +274,10 @@ void cliWaitUserCommand() {
 
 	// Loop infinito apenas interrompido quando o usuário digitar um comando válido
 	while (true) {	
-		printf(">> ");
-		
-		// Lê uma linha de comando		
+		// Lê uma linha de comando
+		printf(TERM_BOLD_CYAN ">> " TERM_YELLOW);		
 		fgets(commandBuffer, BUFFER_SIZE, stdin);
+		printf("%s", TERM_RESET);
 
 		// Remove a quebra de linha da string
 		for (int i = 0; i < BUFFER_SIZE; i++) {
@@ -322,14 +357,7 @@ void cliWaitUserCommand() {
 
 			// Imprime as instruções linha por linha
 			for (int i = 0; i < amount; i++) {
-				uint32_t instruction = emulator.memory[address + i];
-					
-				uint8_t opcode = (instruction & 0xF000) >> 12;
-				uint16_t argument = (instruction & 0x0FFF);
-
-				StringBuffer sb = emuDisassembly(instruction);
-				printf("[%3Xh] %X.%03X: %s\n", address + i, opcode, argument, sb.buffer);
-				stbFree(&sb);
+				emuPrintDisassemblyLine(address + i);
 			}
 		}
 
@@ -361,7 +389,7 @@ void cliWaitUserCommand() {
 			// Imprime as palavras
 			for (int i = 0; i < words; i++) {
 				if (i % 8 == 0) {
-					printf("\n[%3Xh] ", point);
+					printf(TERM_BOLD_WHITE "\n[%3Xh] " TERM_RESET, point);
 				}
 				printf("%04X ", emulator.memory[point]);
 				point++;
@@ -704,6 +732,20 @@ uint16_t* emuGetRegister(uint8_t code) {
 	}
 }
 
+void emuPrintDisassemblyLine(uint16_t address) {
+	// Obtém a instrução no endereço
+	uint32_t instruction = emulator.memory[address];
+					
+	// Extrai da instrução os bits do código de operação e argumento X
+	uint8_t opcode = (instruction & 0xF000) >> 12;
+	uint16_t argument = (instruction & 0x0FFF);
+
+	// Transforma a instrução em string
+	StringBuffer sb = emuDisassembly(instruction);
+	printf(TERM_BOLD_WHITE "[%3Xh] " TERM_RESET "%X.%03X: " TERM_CYAN "%s" TERM_RESET "\n", address, opcode, argument, sb.buffer);
+	stbFree(&sb);
+}
+
 StringBuffer emuDisassembly(uint16_t instruction) {
 	// Inicializa um buffer para as strings impressas nessa função
 	StringBuffer bufferStg;
@@ -846,14 +888,13 @@ void emuDumpRegisters() {
 	printf("D:   0x%04hx\n", regs->D);	
 }
 
-void pause() {
-	getchar();
-}
-
+// -- Handler de SIGINT (interrupção pelo CTRL-C) --
 void INTHandler(int sign) {
+	printf(TERM_RESET " ");
+
 	signal(sign, SIG_IGN);
 
-	if (difftime(time(NULL), lastInterruptBreak) < 1.0) {
+	if (difftime(time(NULL), lastInterruptBreak) < 1.5) {
 		exit(0);
 	}
 
@@ -867,6 +908,7 @@ void INTHandler(int sign) {
 	signal(SIGINT, INTHandler);
 }
 
+// -- Funções auxiliares genéricas --
 void setBit(uint16_t* reg, int bit, bool value) {
 	uint16_t num = *reg;
 	num &= ~(1UL << bit);            // Clear bit first
@@ -883,6 +925,10 @@ void toLowerCase(char* str) {
 		*str = tolower(*str);
 		str++;
 	}
+}
+
+void pause() {
+	getchar();
 }
 
 // -- Funções de manipulação de StringBuffer --
