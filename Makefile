@@ -6,8 +6,14 @@ CFLAGS +=-Werror=return-type -Werror=incompatible-pointer-types
 # Desativa esse warning
 CFLAGS +=-Wno-unused-variable
 
-test1: ep.exe sample1.ram
-	ep.exe sample1.ram 
+test1: ep.exe
+	ep img/overflowEesr-testado.mem
+
+test2: ep.exe
+	ep img/overflowEesr.mem
+
+test3: ep.exe
+	ep img/movRegAcc.mem
 
 test4: ep.exe
 	ep img/initEPSW.mem
