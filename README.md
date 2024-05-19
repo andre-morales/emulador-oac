@@ -41,6 +41,9 @@ Todos os comandos podem ser vistos com o emulador parado e digitando ```help``` 
 	
 	dobreak: reenables emulator pauses on cpu faults.
 ```
+## Exemplo
+![](./exemplo.png)
 
 ## Compilação
 Para compilar o emulador, deve-se obter os arquivos driverEP1.c e driverEP1.h disponíveis no repositório do professor. O Makefile já vem pronto para compilação e para alguns testes.
+No topo do arquivo principal há várias flags de compilação para que seja possível customizar o comportamento do emulador. A documentação de cada flag se encontra no próprio arquivo.
