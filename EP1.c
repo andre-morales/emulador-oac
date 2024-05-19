@@ -23,25 +23,25 @@
 #define FINAL_EX_MODE 0
 
 // Configura se cores serão usadas ou não no console. Desative se estiver tendo problemas com
-// terminais antigos
+// terminais que não suportam escapes ANSI apropriadamente
 #define ENABLE_COLORS 1
 
-// Se configurado, interrompe o emulador logo antes de executar a primeira instrução
+// Se habilitado, interrompe o emulador logo antes de executar a primeira instrução
 #define START_IN_BREAKING_MODE 1
 
-// Quando configurado, intercepta CTRL-C para interromper a execução do emulador
+// Quando habilitado, intercepta CTRL-C para interromper a execução do emulador
 #define INSTALL_SIGINT_HANDLER 1
 
-// Se configurado, por padrão interromperá a execução quando houver uma fault
+// Se habilitado, por padrão interromperá a execução quando houver uma fault
 #define BREAK_AT_FAULTS 1
 
 // Configura se a notação extendida ou padrão será usada nos disassemblies
 #define DEFAULT_EXTENDED_NOTATION 1
 
-// Configura se a ocorrência loop-around na memória é uma fault ou apenas um warning
+// Configura se a ocorrência de loop-around na memória gera uma fault ou apenas um aviso
 #define FAULT_ON_LOOP_AROUND 1
 
-// -- Definição dos registradores do processador
+// Definição dos registradores do processador
 typedef struct {
 	uint16_t RI;
 	uint16_t PC;
@@ -53,7 +53,7 @@ typedef struct {
 	uint16_t PSW;
 } Registers;
 
-// -- Definição da estrutura do emulador
+// Definição da estrutura do emulador
 typedef struct {
 	Registers* registers;
 	uint16_t* memory;
@@ -64,7 +64,7 @@ typedef struct {
 	bool breakOnFaults;
 } Emul;
 
-// -- Definição de string buffer para a formatação de mensagens
+// Definição de string buffer para a formatação de mensagens
 typedef struct {
 	char* buffer;
 	size_t position;
@@ -72,16 +72,18 @@ typedef struct {
 	size_t capacity;
 } StringBuffer;
 
-// -- Guias de controle da interface de usuário
+// Guias de controle da interface de usuário
 typedef enum {
 	CLI_DO_NOTHING, CLI_DO_RESET, CLI_DO_QUIT
 } CliControl;
 
+// Resultados possíveis da execução de uma instrução
 typedef enum {
 	EMU_OK, EMU_HALT, EMU_FAULT
 } EmuResult;
 
 // -- Funções de interface de linha de comando
+void cliPrintWelcome();
 CliControl cliBeforeExecute();
 CliControl cliWaitUserCommand();
 void cliInstallIntHandler();
@@ -90,6 +92,7 @@ void cliContinueCmd();
 void cliDisassemblyCmd();
 void cliMemoryCmd();
 void cliHelpCmd();
+void signIntHandler(int sign);
 
 // -- Funções de execução do emulador
 void emuInitialize(uint16_t* memory, int memorySize);
@@ -113,7 +116,6 @@ bool stbPrint(StringBuffer*, const char* fmt, ...);
 void stbFree(StringBuffer*); 
 
 // -- Funções auxiliares genéricas
-void INTHandler(int sign);
 void setBit(uint16_t* reg, int bit, bool value);
 bool getBit(uint16_t value, int bit);
 void toLowerCase(char* str);
@@ -142,7 +144,7 @@ void pause();
 #define TERM_RESET			""
 #endif
 
-// -- Tabelas estáticas
+// Tabela com o nome das intruções para cada opcode
 static const char* const INSTRUCTION_NAMES[] = {
 	"NOP",  // 0000b
 	"LDA",  // 0001b
@@ -162,6 +164,7 @@ static const char* const INSTRUCTION_NAMES[] = {
 	"HLT"   // 1111b
 };
 
+// Nome dos registradores
 static const char* const REGISTER_NAMES[] = {
 	"A",   // 000b
 	"B",   // 001b
@@ -173,6 +176,7 @@ static const char* const REGISTER_NAMES[] = {
 	"PSW", // 111b
 };
 
+// Nome das operações aritméticas
 static const char* const ARIT_OP_NAMES[] = {
 	"SET0", // 000b
 	"SETF", // 001b
@@ -184,6 +188,7 @@ static const char* const ARIT_OP_NAMES[] = {
 	"SUB"   // 111b
 };
 
+// Formatação extendida para as operações aritméticas
 static const char* const ARIT_EXT_FMT[] = {
 	"%s = 0",		 // 000b
 	"%s = FFFF",	 // 001b
@@ -195,20 +200,24 @@ static const char* const ARIT_EXT_FMT[] = {
 	"%s = %s - %s"   // 111b
 };
 
-// -- Estrutura global de emulação
+// Estrutura globais de emulação
 static Emul emulator;
 static time_t lastInterruptBreak;
 static bool extendedNotation = false;
 
-// Entrada principal do programa
+// Entrada principal do programa. Essa função é chamada com um bloco de memória que corresponde ao
+// estado inicial da memória do programa a ser emulado.
+// O bloco de memória é válido durante toda a função principal.
 int processa(short unsigned int* m, int memSize) {
-	printf(TERM_RESET "\n--- PROTO EMULATOR ---\n");
 	uint16_t* memory = (uint16_t*)m;
 
+	// Imprime o cabeçalho de boas vindas
+	cliPrintWelcome();
+	
 	// Configura um handler para o CTRL-C 
 	cliInstallIntHandler();
 
-	// Estrutura do emulador
+	// Inicializa as estruturas do emulador
 	emuInitialize(memory, memSize);
 	
 	printf("Memory size: 0x%X words.\n", memSize);
@@ -240,7 +249,7 @@ int processa(short unsigned int* m, int memSize) {
 		// Incrementa program counter para a próxima instrução
 		emuAdvance();
 
-	// O programa cessa ao encontrar HLT
+	// Guarda adicional: O programa cessa ao encontrar HLT
 	} while ((regs->RI & 0xF000) != 0xF000);
 
 	printf("\nCPU Halted.\n");
@@ -248,12 +257,17 @@ int processa(short unsigned int* m, int memSize) {
 	return 0;
 }
 
-// Instala INTHandler como um monitor para o CTRL-C
+// Imprime o cabeçalho de boas vindas
+void cliPrintWelcome() {
+	printf("\n---- PROTO EMULATOR 1.0 ----\n");
+}
+
+// Instala signIntHandler como um monitor para o CTRL-C
 void cliInstallIntHandler() {
 	#if !FINAL_EX_MODE && INSTALL_SIGINT_HANDLER
 	printf("Press CTRL-C to break execution and start debugging.\n");
 	time(&lastInterruptBreak);
-	signal(SIGINT, INTHandler);
+	signal(SIGINT, signIntHandler);
 	#endif
 }
 
@@ -278,7 +292,7 @@ CliControl cliBeforeExecute() {
 	return CLI_DO_NOTHING;
 }
 
-// Espera o usuário digitar algum comando
+// Loop do prompt de comandos quando emulador estiver parado
 CliControl cliWaitUserCommand() {
 	const size_t BUFFER_SIZE = 128;
 	static char commandBuffer1[128] = { 0 };
@@ -288,6 +302,7 @@ CliControl cliWaitUserCommand() {
 	static char* commandBuffer = commandBuffer1;
 	static char* lastCommand = commandBuffer2;
 
+	// Se é a primeira vez que o usuário para a execução
 	if (firstBreak) {
 		firstBreak = false;
 		printf(TERM_GREEN "You are in step-through mode. You can view memory contents, registers and disassembly.");
@@ -395,11 +410,13 @@ CliControl cliWaitUserCommand() {
 	return CLI_DO_NOTHING;
 }
 
+// Desabilita o modo step-through e deixa o emulador voltar a execução
 void cliContinueCmd() {
 	printf("Resuming execution...\n");
 	emulator.breaking = false;
 }
 
+// Avança um certo número de passos na execução
 void cliStepCmd() {
 	emulator.stepsLeft = 0;
 
@@ -410,6 +427,7 @@ void cliStepCmd() {
 	}
 }
 
+// Imprime o disassembly das instruções desejadas
 void cliDisassemblyCmd() {
 	uint32_t address = emulator.registers->PC;
 	uint32_t amount = 1;
@@ -438,6 +456,7 @@ void cliDisassemblyCmd() {
 	}
 }
 
+// Exibe os conteúdos da posição de memória escolhida
 void cliMemoryCmd() {
 	// Obtém em string o número do endereço
 	char* pointStr = strtok(NULL, " ");
@@ -479,6 +498,7 @@ void cliMemoryCmd() {
 	printf("\n");
 }
 
+// Imprime a mensagem de ajuda do emulador
 void cliHelpCmd() {
 	printf("Pressing CTRL-C at any time will interrupt emulation.\nPressing it in quick succession will quit the emulator entirely.\n");
 	printf("\nhelp: prints this help guide.\n");
@@ -493,6 +513,8 @@ void cliHelpCmd() {
 	printf("\ndobreak: reenables emulator pauses on cpu faults.\n");
 }
 
+// Inicializa o emulador com a memória dada. A memória é considerada viva e será modificada durante
+// a execução do emulador.
 void emuInitialize(uint16_t* memory, int memSize) {
 	// Estrutura do emulador
 	emulator.memory = memory;
@@ -501,6 +523,9 @@ void emuInitialize(uint16_t* memory, int memSize) {
 	emulator.stepsLeft = 0;
 	emulator.breaking = false;
 	emulator.breakOnFaults = false;
+
+	// Salva uma cópia da memória passada em um "snapshot". Esse snapshot é utilizado caso
+	// o usuário realize um 'reset' no emulador
 	emulator.snapshot = (uint16_t*)malloc(memSize * sizeof(uint16_t));
 	memcpy(emulator.snapshot, memory, memSize * sizeof(uint16_t));
 
@@ -509,6 +534,7 @@ void emuInitialize(uint16_t* memory, int memSize) {
 	emulator.breaking = true;
 	#endif
 
+	// Habilita a notação extendida por padrão
 	#if !FINAL_EX_MODE && DEFAULT_EXTENDED_NOTATION
 	extendedNotation = true;
 	#endif
@@ -521,6 +547,8 @@ void emuInitialize(uint16_t* memory, int memSize) {
 	emuReset();
 }
 
+// Realiza um reset. Todos os registradores são reinicializados para 0 e a memória viva é
+// reinicializada com uma cópia do snapshot feito na inicialização
 void emuReset() {
 	// Inicializa para 0 todos os registradores
 	Registers* regs = emulator.registers;
@@ -537,6 +565,7 @@ void emuReset() {
 	memcpy(emulator.memory, emulator.snapshot, emulator.memorySize * 2);
 }
 
+// Obtém a instrução atual apontada pelo program counter. Atualiza o registrador de instruções RI
 uint16_t emuFetch() {
 	Registers* regs = emulator.registers;
 
@@ -546,6 +575,7 @@ uint16_t emuFetch() {
 	return instruction;
 }
 
+// Avança o program counter uma instrução a frente
 void emuAdvance() {
 	Registers* regs = emulator.registers;
 
@@ -564,13 +594,14 @@ void emuAdvance() {
 	}
 }
 
+// Executa a instrução dada como parâmetro
 EmuResult emuExecute(uint16_t instruction) {
 	Registers* regs = emulator.registers;
 	uint16_t* memory = emulator.memory;
 
 	// Extrai da instrução os 4 bits do código de operação
 	// e os bits do argumento X da instrução
-	uint8_t opcode = (instruction & 0xF000) >> 12;
+	uint8_t opcode =    (instruction & 0xF000) >> 12;
 	uint16_t argument = (instruction & 0x0FFF);
 
 	switch(opcode) {
@@ -666,6 +697,7 @@ EmuResult emuExecute(uint16_t instruction) {
 	return EMU_OK;
 }
 
+// Executa uma instrução de aritmética ARIT com o argumento X completo
 void emuDoArit(uint16_t argument) {
 	Registers* regs = emulator.registers;
 	uint16_t* PSW = &emulator.registers->PSW;
@@ -754,7 +786,7 @@ void emuDoArit(uint16_t argument) {
 		break;
 	default:
 		emuFault("Unimplemented arit operation %i\n", (int)bitsOpr);
-		break;
+		return;
 	}
 
 	// Compara os operandos 1 e 2 e seta os bits 13, 12 e 11 de acordo com as comparações
@@ -766,6 +798,9 @@ void emuDoArit(uint16_t argument) {
 	setBit(PSW, 11, greater);
 }
 
+// Retorna o endereço do registrador correspondente ao código de 3 bits passado.
+// Os registradores são { A, B, C, D, _, _, R, PSW }
+// Se um código inválido for passado, NULL é retornado
 uint16_t* emuGetRegister(uint8_t code) {
 	Registers* r = emulator.registers;
 	switch (code) {
@@ -780,12 +815,13 @@ uint16_t* emuGetRegister(uint8_t code) {
 	case 0x6:
 		return &r->R;
 	case 0x7:
-		return &r->PSW;
-	default:
-		return NULL;
+		return &r->PSW;	
 	}
+	return NULL;
 }
 
+// Imprime no console uma linha com o endereço e disassembly da instrução apontada pelo
+// endereço passado como argumento
 void emuPrintDisassemblyLine(uint16_t address) {
 	// Obtém a instrução no endereço
 	uint32_t instruction = emulator.memory[address];
@@ -800,6 +836,7 @@ void emuPrintDisassemblyLine(uint16_t address) {
 	stbFree(&sb);
 }
 
+// Retorna uma string que representa o disassembly da instrução passada
 StringBuffer emuDisassembly(uint16_t instruction) {
 	// Inicializa um buffer para as strings impressas nessa função
 	StringBuffer bufferStg;
@@ -895,12 +932,14 @@ bool emuGuardAddress(uint16_t addr) {
 	return false;
 }
 
+// Lança uma falha de CPU por tentar executar uma instrução mal formulada ou que não existe
 void emuBadInstruction() {
 	uint32_t RI = emulator.registers->RI;
 	uint32_t PC = emulator.registers->PC;
 	emuFault("Bad instruction 0x%04X at 0x%03X", RI, PC);
 }
 
+// Lança uma falha de CPU com a mensagem formata desejada
 void emuFault(const char* fmt, ...) {
 	va_list args;
 	va_start(args, fmt);
@@ -919,6 +958,7 @@ void emuFault(const char* fmt, ...) {
 	va_end(args);
 }
 
+// Imprime no console um warning
 void emuWarn(const char* fmt, ...) {
 	va_list args;
 	va_start(args, fmt);
@@ -930,6 +970,7 @@ void emuWarn(const char* fmt, ...) {
 	va_end(args);
 }
 
+// Imprime no terminal o conteúdo de todos os registradores da CPU emulada
 void emuDumpRegisters() {
 	Registers* regs = emulator.registers;
 	printf("---- Program registers ----\n");
@@ -947,8 +988,8 @@ void emuDumpRegisters() {
 	printf("D:   0x%04hx\n", regs->D);	
 }
 
-// -- Handler de SIGINT (interrupção pelo CTRL-C) --
-void INTHandler(int sign) {
+// Handler de SIGINT (interrupção pelo CTRL-C)
+void signIntHandler(int sign) {
 	static bool interruptedBefore = false;
 
 	// Remove all console colors
@@ -973,7 +1014,7 @@ void INTHandler(int sign) {
 	emulator.breaking = true;
 
 	// Reset signal handler
-	signal(SIGINT, INTHandler);
+	signal(SIGINT, signIntHandler);
 }
 
 // -- Funções auxiliares genéricas --
