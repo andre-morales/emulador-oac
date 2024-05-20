@@ -64,8 +64,8 @@ typedef struct {
 	bool breakOnFaults;
 } Emul;
 
-// Definição de string buffer para a formatação de mensagens
-typedef struct {
+/// StringBuffer: Permite a manipulação e concatenação de strings formatadas
+typedef struct StringBufferT {
 	char* buffer;
 	size_t position;
 	size_t size;
@@ -83,6 +83,7 @@ typedef enum {
 } EmuResult;
 
 // -- Funções de interface de linha de comando
+
 void cliPrintWelcome();
 CliControl cliBeforeExecute();
 CliControl cliWaitUserCommand();
@@ -95,6 +96,7 @@ void cliHelpCmd();
 void signIntHandler(int sign);
 
 // -- Funções de execução do emulador
+
 void emuInitialize(uint16_t* memory, int memorySize);
 void emuReset();
 uint16_t emuFetch();
@@ -111,11 +113,14 @@ void emuPrintDisassemblyLine(uint16_t address);
 StringBuffer emuDisassembly(uint16_t instruction);
 
 // -- Funções auxiliares de manipulação de strings
+
 void stbInit(StringBuffer*);
-bool stbPrint(StringBuffer*, const char* fmt, ...);
+bool stbAppend(StringBuffer*, const char* fmt, ...);
+bool stbAppendv(StringBuffer* sb, const char* fmt, va_list args);
 void stbFree(StringBuffer*); 
 
 // -- Funções auxiliares genéricas
+
 bool strEquals(const char* a, const char* b);
 void setBit(uint16_t* reg, int bit, bool value);
 bool getBit(uint16_t value, int bit);
@@ -313,8 +318,9 @@ CliControl cliWaitUserCommand() {
 	// Se é a primeira vez que o usuário para a execução
 	if (firstBreak) {
 		firstBreak = false;
-		printf(TERM_GREEN "You are in step-through mode. You can view memory contents, registers and disassembly.");
-		printf("\nType " TERM_YELLOW "help" TERM_GREEN " to view all commands.\n" TERM_RESET);
+		printf(TERM_GREEN "You are in step-through mode. ");
+		printf("You can view memory contents, registers and disassembly.\n");
+		printf("Type " TERM_YELLOW "help" TERM_GREEN " to view all commands.\n" TERM_RESET);
 	}
 
 	// Loop infinito apenas interrompido quando o usuário digitar um comando válido
@@ -414,7 +420,8 @@ CliControl cliWaitUserCommand() {
 			continue;
 		}
 
-		printf(TERM_BOLD_RED "Unknown command '%s'. Type 'help' for a list of commands.\n" TERM_RESET, cmd);
+		printf(TERM_BOLD_RED "Unknown command '%s'. ", cmd);
+		printf("Type 'help' for a list of commands.\n" TERM_RESET);
 	}
 
 	return CLI_DO_NOTHING;
@@ -462,13 +469,15 @@ void cliDisassemblyCmd() {
 
 	// Imprime as instruções linha por linha
 	for (int i = 0; i < amount; i++) {
+		uint16_t addr = address + i;
+
 		// Previne a leitura de endereços inválidos
-		if (address + i >= emulator.memorySize) {
-			printf(TERM_BOLD_RED "Instruction address 0x%X out of bounds (0x%X)\n" TERM_RESET, address + i, emulator.memorySize);
+		if (addr >= emulator.memorySize) {
+			printf(TERM_BOLD_RED "Instruction address 0x%X out of bounds (0x%X)\n" TERM_RESET, addr, emulator.memorySize);
 			return;
 		}
 
-		emuPrintDisassemblyLine(address + i);
+		emuPrintDisassemblyLine(addr);
 	}
 }
 
@@ -754,7 +763,8 @@ void emuDoArit(uint16_t argument) {
 	// Obtém o registrador operando usando os bits de Op2
 	uint16_t* regOp2;
 
-	// Se o bit mais significante do operando 2 for 0, o operando é considerado como o próprio número 0.
+	// Se o bit mais significante do operando 2 for 0,
+	// o operando é considerado como o próprio número 0.
 	if ((bitsOp2 & 0b100) == 0) {
 		regOp2 = NULL;
 	// Caso contrário, os outros dois bits selecionarão um registrador de A, B, C ou D
@@ -879,42 +889,42 @@ StringBuffer emuDisassembly(uint16_t instruction) {
 	const char* name = INSTRUCTION_NAMES[opcode];
 
 	// As instruções por padrão sairão em azul claro
-	stbPrint(buffer, TERM_CYAN);
+	stbAppend(buffer, TERM_CYAN);
 
 	switch(opcode) {
 	// NOP -- 0000b
 	case 0x0:
-		stbPrint(buffer, TERM_BOLD_BLACK "%s ", name);
+		stbAppend(buffer, TERM_BOLD_BLACK "%s ", name);
 		break;
 
 	// LDA(x) -- 0001b
 	case 0x1:
-		stbPrint(buffer, "%s [%Xh]", name, argument);
+		stbAppend(buffer, "%s [%Xh]", name, argument);
 		break;
 
 	// STA(x) -- 0010b
 	case 0x2:
-		stbPrint(buffer, "%s [%Xh]", name, argument);
+		stbAppend(buffer, "%s [%Xh]", name, argument);
 		break;
 
 	// JMP(x) -- 0011b
 	case 0x3:
-		stbPrint(buffer, "%s %Xh", name, argument);
+		stbAppend(buffer, "%s %Xh", name, argument);
 		break;
 
 	// JNZ(x) -- 0100b
 	case 0x4:
-		stbPrint(buffer, "%s %Xh", name, argument);
+		stbAppend(buffer, "%s %Xh", name, argument);
 		break;
 
 	// RET 
 	case 0x5:
-		stbPrint(buffer, "%s", name);
+		stbAppend(buffer, "%s", name);
 		break;
 
 	// ARIT(opr, dst, op1, op2) -- 0110b
 	case 0x6:
-		stbPrint(buffer, "%s ", name);
+		stbAppend(buffer, "%s ", name);
 
 		// Extração dos bits respectivamente:
 		// 3 bits que determinam a operação aritmética a realizar
@@ -931,28 +941,28 @@ StringBuffer emuDisassembly(uint16_t instruction) {
 
 		if (extendedNotation) {
 			// Imprime RES = OP1 * OP2
-			stbPrint(buffer, ARIT_EXT_FMT[bitsOpr],
+			stbAppend(buffer, ARIT_EXT_FMT[bitsOpr],
 				REGISTER_NAMES[bitsDst],
 				REGISTER_NAMES[bitsOp1],
 				(op2zero) ? "0" : REGISTER_NAMES[bitsOp2 & 0b011]
 			);
 		} else {
 			// Imprime em sequência OPERAÇÃO, RES, OP1, OP2
-			stbPrint(buffer, "%s, ", ARIT_OP_NAMES[bitsOpr]);
-			stbPrint(buffer, "%s, ", REGISTER_NAMES[bitsDst]);
-			stbPrint(buffer, "%s, ", REGISTER_NAMES[bitsOp1]);
-			stbPrint(buffer, "%s ", (op2zero) ? "zero" : REGISTER_NAMES[bitsOp2 & 0b011]);
+			stbAppend(buffer, "%s, ", ARIT_OP_NAMES[bitsOpr]);
+			stbAppend(buffer, "%s, ", REGISTER_NAMES[bitsDst]);
+			stbAppend(buffer, "%s, ", REGISTER_NAMES[bitsOp1]);
+			stbAppend(buffer, "%s ", (op2zero) ? "zero" : REGISTER_NAMES[bitsOp2 & 0b011]);
 		}
 		break;
 
 	// HLT - 1111b
 	case 0xF:
-		stbPrint(buffer, "%s", name);
+		stbAppend(buffer, "%s", name);
 		break;
 
 	// Instrução desconhecida
 	default:
-		stbPrint(buffer, TERM_BOLD_YELLOW "%s :: %X.%03X", name, opcode, argument);
+		stbAppend(buffer, TERM_BOLD_YELLOW "%s :: %X.%03X", name, opcode, argument);
 		break;
 	}
 
@@ -984,9 +994,14 @@ void emuFault(const char* fmt, ...) {
 	va_list args;
 	va_start(args, fmt);
 
-	printf(TERM_BOLD_RED "[ERR!] CPU FAULT: " TERM_RESET);
-	vfprintf(stdout, fmt, args);
-	printf("\n\n");
+	// Imprime a mensagem de CPU FAULT no terminal
+	StringBuffer sb;
+	stbInit(&sb);
+	stbAppend(&sb, TERM_BOLD_RED TERM_BOLD_RED "[ERR!] CPU FAULT: " TERM_RESET);
+	stbAppendv(&sb, fmt, args);
+	stbAppend(&sb, "\n");
+	printf("%s\n", sb.buffer);
+	stbFree(&sb);
 
 	// Coloca o emulador em modo step-through e interrompe qualquer sequência de steps se havia
 	// alguma antes
@@ -1003,9 +1018,14 @@ void emuWarn(const char* fmt, ...) {
 	va_list args;
 	va_start(args, fmt);
 
-	printf(TERM_BOLD_YELLOW "[WRN!] " TERM_RESET);
-	vfprintf(stdout, fmt, args);
-	printf("\n\n");
+	StringBuffer sb;
+	stbInit(&sb);
+
+	stbAppend(&sb, TERM_BOLD_YELLOW "[WRN!] " TERM_RESET);
+	stbAppendv(&sb, fmt, args);
+	
+	printf("%s\n\n", sb.buffer);
+	stbFree(&sb);
 
 	va_end(args);
 }
@@ -1057,7 +1077,10 @@ void signIntHandler(int sign) {
 	signal(SIGINT, signIntHandler);
 }
 
-// -- Funções auxiliares genéricas --
+/// @brief Seta um bit do número passado
+/// @param reg Um pointeiro para um número o qual se deseja setar o bit
+/// @param bit A posição do bit. O bit 0 é o bit menos significante e o 15 o mais significante
+/// @param value Um booleano 1 ou 0 com o valor desejado
 void setBit(uint16_t* reg, int bit, bool value) {
 	uint16_t num = *reg;
 	num &= ~(1UL << bit);            // Clear bit first
@@ -1065,6 +1088,10 @@ void setBit(uint16_t* reg, int bit, bool value) {
 	*reg = num;
 }
 
+/// @brief Obtém o valor do bit em uma posição no valor
+/// @param value O valor o qual se deseja extrair o bit
+/// @param bit A posição do bit desejado
+/// @return Um bool true se o bit está setado, false, caso contrário
 bool getBit(uint16_t value, int bit) {
 	return (value >> bit) & 1UL;
 }
@@ -1085,6 +1112,8 @@ void pause() {
 }
 
 // -- Funções de manipulação de StringBuffer --
+
+/// Inicializa um buffer de strings.
 void stbInit(StringBuffer* sb) {
 	sb->capacity = 512;
 	sb->position = 0;
@@ -1092,14 +1121,30 @@ void stbInit(StringBuffer* sb) {
 	sb->buffer = (char*) malloc(sizeof(char) * sb->capacity);
 }
 
-bool stbPrint(StringBuffer* sb, const char* fmt, ...) {
+/// @brief Concatena no buffer uma string formatada
+/// @param sb O buffer previamente alocado pelo usuário
+/// @param fmt A string formatada em estilo printf
+/// @return Verdadeiro se a concatenação foi bem sucedida, falso caso contrário.
+bool stbAppend(StringBuffer* sb, const char* fmt, ...) {
+	va_list args;
+	va_start(args, fmt);
+
+	bool result = stbAppendv(sb, fmt, args);
+
+	va_end(args);
+	return result;
+}
+
+/// @brief Concatena a um string buffer uma string formatada com lista de parâmetros.
+/// @param sb O buffer em questão previamente inicializado.
+/// @param fmt A string de formatos no estilo printf.
+/// @param args A lista de argumentos.
+/// @return Verdadeiro se a concatenação foi bem sucedida, falso caso contrário.
+bool stbAppendv(StringBuffer* sb, const char* fmt, va_list args) {
 	char* ptr = sb->buffer + sb->position;
 	size_t len = sb->capacity - sb->size;
 
-	va_list args;
-	va_start(args, fmt);
 	int written = vsnprintf(ptr, len, fmt, args);
-	va_end(args);
 
 	// Erro de formatação. Não foi escrito nada
 	if (written < 0) return false;
@@ -1114,6 +1159,7 @@ bool stbPrint(StringBuffer* sb, const char* fmt, ...) {
 	return true;
 }
 
+/// Libera a memória utilizada pelo buffer de strings
 void stbFree(StringBuffer* sb) {
 	free(sb->buffer);
 	sb->size = 0;
