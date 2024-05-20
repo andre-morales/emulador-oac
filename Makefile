@@ -1,4 +1,6 @@
-all: ep.exe
+release: ep.exe
+
+debug: epd.exe
 
 CFLAGS =-std=c99 -Wall
 # Torna esses warnings em erros
@@ -23,6 +25,9 @@ random: ep.exe
 
 ep.exe: EP1.c
 	gcc EP1.c driverEP1.c $(CFLAGS) -o ep.exe
+
+epd.exe: EP1.c
+	gcc EP1.c driverEP1.c $(CFLAGS) -o epd.exe -g
 
 clean:
 	del *.exe

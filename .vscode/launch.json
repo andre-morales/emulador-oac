@@ -1,0 +1,25 @@
+{
+	// Use IntelliSense to learn about possible attributes.
+	// Hover to view descriptions of existing attributes.
+	// For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Build and Debug",
+			"type": "cppdbg",
+			"request": "launch",
+			"program": "${workspaceFolder}/epd.exe",
+			"args": [
+				"sample1.ram"
+			],
+			"stopAtEntry": false,
+			"cwd": "${workspaceFolder}",
+			"environment": [],
+			"externalConsole": false,
+			"MIMode": "gdb",
+			"miDebuggerPath": "gdb",
+			"preLaunchTask": "make-debug"
+		}
+
+	]
+}
