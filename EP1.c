@@ -116,6 +116,7 @@ bool stbPrint(StringBuffer*, const char* fmt, ...);
 void stbFree(StringBuffer*); 
 
 // -- Funções auxiliares genéricas
+bool strEquals(const char* a, const char* b);
 void setBit(uint16_t* reg, int bit, bool value);
 bool getBit(uint16_t value, int bit);
 void toLowerCase(char* str);
@@ -123,17 +124,22 @@ void pause();
 
 // -- Sequências de escape para as cores no console
 #if ENABLE_COLORS
+#define TERM_BOLD_BLACK		"\033[1;30m"
 #define TERM_BOLD_RED		"\033[1;31m"
+#define TERM_BOLD_GREEN		"\033[1;32m"
 #define TERM_BOLD_YELLOW	"\033[1;33m"
 #define TERM_BOLD_MAGENTA	"\033[1;35m"
 #define TERM_BOLD_CYAN		"\033[1;36m"
 #define TERM_BOLD_WHITE		"\033[1;37m"
 #define TERM_GREEN			"\033[32m"
 #define TERM_YELLOW			"\033[33m"
-#define TERM_CYAN			"\033[36m"
+#define TERM_CYAN			"\033[0;36m"
+#define TERM_WHITE			"\033[37m"
 #define TERM_RESET			"\033[0m"
 #else
+#define TERM_BOLD_BLACK		""
 #define TERM_BOLD_RED		""
+#define TERM_BOLD_GREEN		""
 #define TERM_BOLD_YELLOW	""
 #define TERM_BOLD_MAGENTA	""
 #define TERM_BOLD_CYAN		""
@@ -221,7 +227,7 @@ int processa(short unsigned int* m, int memSize) {
 	emuInitialize(memory, memSize);
 	
 	printf("Memory size: 0x%X words.\n", memSize);
-	printf("Beginning execution...\n");
+	printf("Beginning execution...\n\n");
 
 	Registers* regs = emulator.registers;
 	do {
@@ -259,7 +265,9 @@ int processa(short unsigned int* m, int memSize) {
 
 // Imprime o cabeçalho de boas vindas
 void cliPrintWelcome() {
-	printf("\n---- PROTO EMULATOR 1.0 ----\n");
+	printf(TERM_CYAN "\n---- PROTO EMULATOR V1.01 ----\n");
+	printf("Author: " TERM_BOLD_MAGENTA "André Morales\n");
+	printf("\tgithub.com/andre-morales\n\n" TERM_RESET);
 }
 
 // Instala signIntHandler como um monitor para o CTRL-C
@@ -341,70 +349,72 @@ CliControl cliWaitUserCommand() {
 		if (cmdLine[0] == '\0') continue;
 
 		// Obtém o comando principal antes do espaço
-		char* command = strtok(cmdLine, " ");
-		toLowerCase(command);
+		char* cmd = strtok(cmdLine, " ");
+		toLowerCase(cmd);
 
 		// Comando step <amount>: Permite executar um número de instruções em sequência
-		if (strcmp(command, "s") == 0 || strcmp(command, "step") == 0) {
+		if (strEquals(cmd, "s") || strEquals(cmd, "step")) {
 			cliStepCmd();
 			break;
 		}
 
 		// Comando continue: Desativa o modo step-through do emulador
-		if (strcmp(command, "c") == 0 || strcmp(command, "continue") == 0) {
+		if (strEquals(cmd, "c") || strEquals(cmd, "continue")) {
 			cliContinueCmd();
 			break;
 		}
 
 		// Comando registers: Imprime o conteúdo de todos os registradores
-		if (strcmp(command, "r") == 0 || strcmp(command, "registers") == 0) {
+		if (strEquals(cmd, "r") || strEquals(cmd, "registers")) {
 			emuDumpRegisters();
 			continue;
 		}
 
 		// Comando disassembly [address] [amount]: Imprime um número de instruções no endereço dado
 		// Se não for passado um endereço. Imprime a instrução atual
-		if (strcmp(command, "d") == 0 || strcmp(command, "disassembly") == 0) {
+		if (strEquals(cmd, "d") || strEquals(cmd, "disassembly")) {
 			cliDisassemblyCmd();
 			continue;
 		}
 
 		// Comando memory <address> [words]: Observa a memória no ponto dado
-		if (strcmp(command, "m") == 0 || strcmp(command, "x") == 0 || strcmp(command, "memory") == 0) {
+		if (strEquals(cmd, "m") || strEquals(cmd, "x") || strEquals(cmd, "memory")) {
 			cliMemoryCmd();
 			continue;
 		}
 
 		// Comando quit: Sai do emulador
-		if (strcmp(command, "q") == 0 || strcmp(command, "quit") == 0) {
+		if (strEquals(cmd, "q") || strEquals(cmd, "quit")) {
 			return CLI_DO_QUIT;
 		}
 
 		// Comando reset: Reinicia o emulador com a memória original e os registradores em 0
-		if (strcmp(command, "reset") == 0) {
+		if (strEquals(cmd, "reset")) {
+			printf("Reseting all registers and memory.");
 			emuReset();
+			printf(" Done.\n");
 			return CLI_DO_RESET;
 		}
 
 		// Comando nobreak: Desabilita a parada do emulator no lançamento de falhas
-		if (strcmp(command, "nobreak") == 0) {
+		if (strEquals(cmd, "nobreak")) {
 			emulator.breakOnFaults = false;
 			continue;
 		}
 
 		// Comando dobreak: Rehabilita a parada do emulator no lançamento de falhas
-		if (strcmp(command, "dobreak") == 0) {
+		if (strEquals(cmd, "dobreak")) {
 			emulator.breakOnFaults = true;
 			continue;
 		}
 
 		// Comando help: Imprime a ajuda do programa
-		if (strcmp(command, "help") == 0) {
+		if (strEquals(cmd, "help")) {
 			cliHelpCmd();
 			continue;
 		}
 
-		printf(TERM_BOLD_RED "Unknown command '%s'. Type 'help' for a list of commands.\n" TERM_RESET, command);
+		printf(TERM_BOLD_RED "Unknown command '%s'. Type 'help' for a list of commands.\n" TERM_RESET, cmd);
 	}
 
 	return CLI_DO_NOTHING;
@@ -452,6 +462,12 @@ void cliDisassemblyCmd() {
 
 	// Imprime as instruções linha por linha
 	for (int i = 0; i < amount; i++) {
+		// Previne a leitura de endereços inválidos
+		if (address + i >= emulator.memorySize) {
+			printf(TERM_BOLD_RED "Instruction address 0x%X out of bounds (0x%X)\n" TERM_RESET, address + i, emulator.memorySize);
+			return;
+		}
+
 		emuPrintDisassemblyLine(address + i);
 	}
 }
@@ -500,17 +516,24 @@ void cliMemoryCmd() {
 
 // Imprime a mensagem de ajuda do emulador
 void cliHelpCmd() {
-	printf("Pressing CTRL-C at any time will interrupt emulation.\nPressing it in quick succession will quit the emulator entirely.\n");
-	printf("\nhelp: prints this help guide.\n");
-	printf("\nquit, q: quits out of the emulator.\n");
-	printf("\nstep, s <amount>:\n    Steps through <amount> of instructions and no further.\n");
-	printf("\ncontinue, c:\n    Leaves step-through mode and lets the emulator run freely.\n    Execution will be stopped upon encountering a fault or the user\n    pressing CTRL-C.\n");
-	printf("\nreset:\n    Resets the memory state as it were in the beginning of the emulation\n    and clears all registers.\n");
-	printf("\nregisters, r: \n    View the contents of all CPU registers.\n");
-	printf("\nmemory, m, x <address> [words]:\n    Views the contents of the emulator memory at the given address with an\n    optional amount of words to display.\n");
-	printf("\ndisassembly, d [address] [amount]:\n    Disassembles the given amount of instructions at the address specified.\n    If no address is specified, prints the current instruction.\n");
-	printf("\nnobreak: disables emulator pauses on cpu faults.\n");
-	printf("\ndobreak: reenables emulator pauses on cpu faults.\n");
+	printf("Pressing " TERM_BOLD_RED "CTRL-C" TERM_RESET " at any time will interrupt emulation.");
+	printf("\nPressing it in quick succession will " TERM_BOLD_RED "quit" TERM_RESET " the emulator entirely.\n");
+	printf(TERM_CYAN  "\nhelp:" TERM_RESET " prints this help guide.\n");
+	printf(TERM_CYAN  "\nquit, q:" TERM_RESET " quits out of the emulator.\n");
+	printf(TERM_CYAN  "\nstep, s" TERM_BOLD_CYAN " <amount>:");
+	printf(TERM_RESET "\n    Steps through <amount> of instructions and no further.\n");
+	printf(TERM_CYAN  "\ncontinue, c:");
+	printf(TERM_RESET "\n    Leaves step-through mode and lets the emulator run freely.\n    Execution will be stopped upon encountering a fault or the user\n    pressing CTRL-C.\n");
+	printf(TERM_CYAN  "\nreset:");
+	printf(TERM_RESET "\n    Resets the memory state as it were in the beginning of the emulation\n    and clears all registers.\n");
+	printf(TERM_CYAN  "\nregisters, r:");
+	printf(TERM_RESET "\n    View the contents of all CPU registers.\n");
+	printf(TERM_CYAN  "\nmemory, m, x " TERM_BOLD_CYAN "<address> [words]:");
+	printf(TERM_RESET "\n    Views the contents of the emulator memory at the given address with an\n    optional amount of words to display.\n");
+	printf(TERM_CYAN  "\ndisassembly, d " TERM_BOLD_CYAN "[address] [amount]:");
+	printf(TERM_RESET "\n    Disassembles the given amount of instructions at the address specified.\n    If no address is specified, prints the current instruction.\n");
+	printf(TERM_CYAN  "\nnobreak:" TERM_RESET " disables emulator pauses on cpu faults.\n");
+	printf(TERM_CYAN  "\ndobreak:" TERM_RESET " reenables emulator pauses on cpu faults.\n");
 }
 
 // Inicializa o emulador com a memória dada. A memória é considerada viva e será modificada durante
@@ -823,6 +846,11 @@ uint16_t* emuGetRegister(uint8_t code) {
 // Imprime no console uma linha com o endereço e disassembly da instrução apontada pelo
 // endereço passado como argumento
 void emuPrintDisassemblyLine(uint16_t address) {
+	if (address >= emulator.memorySize) {
+		printf(TERM_BOLD_RED "Instruction address 0x%X out of bounds (0x%X)\n" TERM_RESET, address, emulator.memorySize);
+		return;
+	}
+
 	// Obtém a instrução no endereço
 	uint32_t instruction = emulator.memory[address];
 					
@@ -846,37 +874,48 @@ StringBuffer emuDisassembly(uint16_t instruction) {
 	// Extrai o opcode e o argumento X da instrução
 	uint8_t opcode = (instruction & 0xF000) >> 12;
 	uint16_t argument = (instruction & 0x0FFF);
+		
+	// Obtém o nome da instrução pelo opcode
+	const char* name = INSTRUCTION_NAMES[opcode];
 
-	// Imprime o nome da instrução
-	stbPrint(buffer, "%s ", INSTRUCTION_NAMES[opcode]);
+	// As instruções por padrão sairão em azul claro
+	stbPrint(buffer, TERM_CYAN);
 
 	switch(opcode) {
 	// NOP -- 0000b
 	case 0x0:
+		stbPrint(buffer, TERM_BOLD_BLACK "%s ", name);
 		break;
 
 	// LDA(x) -- 0001b
 	case 0x1:
-		stbPrint(buffer, "[%Xh]", argument);
+		stbPrint(buffer, "%s [%Xh]", name, argument);
 		break;
 
 	// STA(x) -- 0010b
 	case 0x2:
-		stbPrint(buffer, "[%Xh]", argument);
+		stbPrint(buffer, "%s [%Xh]", name, argument);
 		break;
 
 	// JMP(x) -- 0011b
 	case 0x3:
-		stbPrint(buffer, "%Xh", argument);
+		stbPrint(buffer, "%s %Xh", name, argument);
 		break;
 
 	// JNZ(x) -- 0100b
 	case 0x4:
-		stbPrint(buffer, "%Xh", argument);
+		stbPrint(buffer, "%s %Xh", name, argument);
+		break;
+
+	// RET 
+	case 0x5:
+		stbPrint(buffer, "%s", name);
 		break;
 
 	// ARIT(opr, dst, op1, op2) -- 0110b
 	case 0x6:
+		stbPrint(buffer, "%s ", name);
+
 		// Extração dos bits respectivamente:
 		// 3 bits que determinam a operação aritmética a realizar
 		// 3 bits que definem o registrador destino da operação
@@ -908,11 +947,12 @@ StringBuffer emuDisassembly(uint16_t instruction) {
 
 	// HLT - 1111b
 	case 0xF:
+		stbPrint(buffer, "%s", name);
 		break;
 
 	// Instrução desconhecida
 	default:
-		stbPrint(buffer, ":: %X.%03X", opcode, argument);
+		stbPrint(buffer, TERM_BOLD_YELLOW "%s :: %X.%03X", name, opcode, argument);
 		break;
 	}
 
@@ -1034,6 +1074,10 @@ void toLowerCase(char* str) {
 		*str = tolower(*str);
 		str++;
 	}
+}
+
+bool strEquals(const char* a, const char* b) {
+	return strcmp(a, b) == 0;
 }
 
 void pause() {
