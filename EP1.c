@@ -20,7 +20,7 @@
 
 // Se configurado como 1, desativa todos os recursos interativos do emulador e o coloca em um modo
 // de "apenas execução". Esse modo é usado em testes automatizados. 
-#define FINAL_EX_MODE 0
+#define DUMMY_MODE 0
 
 // Configura se cores serão usadas ou não no console. Desative se estiver tendo problemas com
 // terminais que não suportam escapes ANSI apropriadamente
@@ -277,7 +277,7 @@ void cliPrintWelcome() {
 
 // Instala signIntHandler como um monitor para o CTRL-C
 void cliInstallIntHandler() {
-	#if !FINAL_EX_MODE && INSTALL_SIGINT_HANDLER
+	#if !DUMMY_MODE && INSTALL_SIGINT_HANDLER
 	printf("Press CTRL-C to break execution and start debugging.\n");
 	time(&lastInterruptBreak);
 	signal(SIGINT, signIntHandler);
@@ -307,7 +307,8 @@ CliControl cliBeforeExecute() {
 
 // Loop do prompt de comandos quando emulador estiver parado
 CliControl cliWaitUserCommand() {
-	const size_t BUFFER_SIZE = 128;
+#define _COMMAND_BUFFER_SIZE 128
+	const size_t BUFFER_SIZE = _COMMAND_BUFFER_SIZE;
 	static char commandBuffer1[128] = { 0 };
 	static char commandBuffer2[128] = { 0 };
 	static bool firstBreak = true;
@@ -340,7 +341,7 @@ CliControl cliWaitUserCommand() {
 
 		// Se a linha digitada for completamente vazia, o usuário apenas apertou enter e o comando
 		// anterior deve ser executado novamente
-		char cmdLine[BUFFER_SIZE];
+		char cmdLine[_COMMAND_BUFFER_SIZE];
 		if (commandBuffer[0] == '\0') {
 			strncpy(cmdLine, lastCommand, BUFFER_SIZE);
 		} else {
@@ -562,17 +563,17 @@ void emuInitialize(uint16_t* memory, int memSize) {
 	memcpy(emulator.snapshot, memory, memSize * sizeof(uint16_t));
 
 	// Se configurado para tal, começa o emulador já no modo step-through
-	#if !FINAL_EX_MODE && START_IN_BREAKING_MODE
+	#if !DUMMY_MODE && START_IN_BREAKING_MODE
 	emulator.breaking = true;
 	#endif
 
 	// Habilita a notação extendida por padrão
-	#if !FINAL_EX_MODE && DEFAULT_EXTENDED_NOTATION
+	#if !DUMMY_MODE && DEFAULT_EXTENDED_NOTATION
 	extendedNotation = true;
 	#endif
 
 	// Se configurado como tal pelas flags, para o emulador se alguma fault for lançada
-	#if !FINAL_EX_MODE && BREAK_AT_FAULTS
+	#if !DUMMY_MODE && BREAK_AT_FAULTS
 	emulator.breakOnFaults = true;
 	#endif
 
