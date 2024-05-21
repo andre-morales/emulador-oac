@@ -13,6 +13,7 @@
 #include <stdint.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <assert.h>
 #include <signal.h>
 #include <ctype.h>
 #include <time.h>
@@ -53,7 +54,20 @@ typedef struct {
 	uint16_t PSW;
 } Registers;
 
-// Definição da estrutura do emulador
+/// @brief Estrutura de um breakpoint na memória. Possui um endereço e um máximo de hits.
+typedef struct BreakpointT {
+	uint16_t address;
+	int hits;
+} Breakpoint;
+
+/// @brief Vetor dinâmico de inteiros
+typedef struct VectorT {
+	void** array;
+	int size;
+	int capacity;
+} Vector;
+
+/// @brief Definição da estrutura do emulador
 typedef struct {
 	Registers* registers;
 	uint16_t* memory;
@@ -62,15 +76,8 @@ typedef struct {
 	bool breaking;
 	int stepsLeft;
 	bool breakOnFaults;
+	Vector breakpoints;
 } Emul;
-
-/// StringBuffer: Permite a manipulação e concatenação de strings formatadas
-typedef struct StringBufferT {
-	char* buffer;
-	size_t position;
-	size_t size;
-	size_t capacity;
-} StringBuffer;
 
 // Guias de controle da interface de usuário
 typedef enum {
@@ -82,6 +89,14 @@ typedef enum {
 	EMU_OK, EMU_HALT, EMU_FAULT
 } EmuResult;
 
+/// @brief Permite a manipulação e concatenação de strings formatadas
+typedef struct StringBufferT {
+	char* buffer;
+	size_t position;
+	size_t size;
+	size_t capacity;
+} StringBuffer;
+
 // -- Funções de interface de linha de comando
 
 void cliPrintWelcome();
@@ -89,6 +104,7 @@ CliControl cliBeforeExecute();
 CliControl cliWaitUserCommand();
 void cliInstallIntHandler();
 void cliStepCmd();
+void cliBreakpointCmd();
 void cliContinueCmd();
 void cliDisassemblyCmd();
 void cliMemoryCmd();
@@ -106,6 +122,8 @@ void emuDoArit(uint16_t argument);
 uint16_t* emuGetRegister(uint8_t code);
 void emuFault(const char* fmt, ...);
 void emuWarn(const char* fmt, ...);
+void emuSetBreakpoint(uint16_t addr, int hits);
+Breakpoint * emuGetBreakpoint(uint16_t addr);
 bool emuGuardAddress(uint16_t addr);
 void emuBadInstruction();
 void emuDumpRegisters();
@@ -117,7 +135,14 @@ StringBuffer emuDisassembly(uint16_t instruction);
 void stbInit(StringBuffer*);
 bool stbAppend(StringBuffer*, const char* fmt, ...);
 bool stbAppendv(StringBuffer* sb, const char* fmt, va_list args);
-void stbFree(StringBuffer*); 
+void stbFree(StringBuffer*);
+
+// -- Funções de manipulação de vetor dinâmico
+
+void vecFree(Vector* vec);
+void vecGrow(Vector* vec);
+void vecAdd(Vector* vec, void* elem);
+void vecRemove(Vector* vec, int index);
 
 // -- Funções auxiliares genéricas
 
@@ -216,9 +241,9 @@ static Emul emulator;
 static time_t lastInterruptBreak;
 static bool extendedNotation = false;
 
-// Entrada principal do programa. Essa função é chamada com um bloco de memória que corresponde ao
-// estado inicial da memória do programa a ser emulado.
-// O bloco de memória é válido durante toda a função principal.
+/// @brief Entrada principal do programa. Essa função é chamada com um bloco de memória que corresponde ao
+/// estado inicial da memória do programa a ser emulado.
+/// O bloco de memória é válido durante toda a função principal.
 int processa(short unsigned int* m, int memSize) {
 	uint16_t* memory = (uint16_t*)m;
 
@@ -230,7 +255,7 @@ int processa(short unsigned int* m, int memSize) {
 
 	// Inicializa as estruturas do emulador
 	emuInitialize(memory, memSize);
-	
+
 	printf("Memory size: 0x%X words.\n", memSize);
 	printf("Beginning execution...\n\n");
 
@@ -288,6 +313,9 @@ void cliInstallIntHandler() {
 // Se o emulador estiver em step-through, aqui haverá uma chamada para cliWaitUserCommand()
 // para que o usuário interaja com o emulador
 CliControl cliBeforeExecute() {
+	// Verifica e para em breakpoints nessa instrução se houverem
+	emuCheckBreakpoints();
+
 	// Se o usuário pediu para executar um número x de instruções antes (comando step),
 	// não pare a execução nessa função
 	if (emulator.stepsLeft > 0) {
@@ -303,6 +331,25 @@ CliControl cliBeforeExecute() {
 	}
 
 	return CLI_DO_NOTHING;
+}
+
+/// @brief Verifica se há um breakpoint válido na instrução atual.
+/// Caso houver, pare a execução do emulador e imprime uma mensagem na tela.
+void emuCheckBreakpoints() {
+	uint16_t PC = emulator.registers->PC;
+	Breakpoint* bp = emuGetBreakpoint(PC);
+	if (bp && bp->hits != 0) {
+		emulator.stepsLeft = 0;
+		emulator.breaking = true;
+		if (bp->hits > 0) bp->hits--;
+		printf(TERM_GREEN "You've hit a breakpoint at " TERM_YELLOW "0x%0X.\n" TERM_RESET, PC);
+		
+		if (bp->hits > 0) {
+			printf(TERM_GREEN "This breakpoint has" TERM_YELLOW " %i " TERM_GREEN "hits left.\n" TERM_RESET, bp->hits);
+		} else if (bp->hits == 0) {
+			printf(TERM_GREEN "This breakpoint was disabled.\n" TERM_RESET);
+		}
+	}
 }
 
 // Loop do prompt de comandos quando emulador estiver parado
@@ -372,7 +419,7 @@ CliControl cliWaitUserCommand() {
 		}
 
 		// Comando registers: Imprime o conteúdo de todos os registradores
-		if (strEquals(cmd, "r") || strEquals(cmd, "registers")) {
+		if (strEquals(cmd, "r") || strEquals(cmd, "regs") || strEquals(cmd, "registers")) {
 			emuDumpRegisters();
 			continue;
 		}
@@ -387,6 +434,12 @@ CliControl cliWaitUserCommand() {
 		// Comando memory <address> [words]: Observa a memória no ponto dado
 		if (strEquals(cmd, "m") || strEquals(cmd, "x") || strEquals(cmd, "memory")) {
 			cliMemoryCmd();
+			continue;
+		}
+
+		// Comando break <address> [hits]
+		if (strEquals(cmd, "b") || strEquals(cmd, "break")) {
+			cliBreakpointCmd();
 			continue;
 		}
 
@@ -443,6 +496,31 @@ void cliStepCmd() {
 		sscanf(amountStr, "%i", &emulator.stepsLeft);
 		emulator.stepsLeft--;
 	}
+}
+
+/// @brief Comando break <address> [hits] do emulador
+void cliBreakpointCmd() {
+	char* addressStr = strtok(NULL, " ");
+	char* hitsStr = strtok(NULL, " ");
+
+	if (!addressStr) {
+		printf(TERM_BOLD_RED "A memory point must be passed to this command.\n" TERM_RESET);
+		return;
+	}
+
+	int address = -1;
+	sscanf(addressStr, "%x", &address);
+
+	if (address < 0 || address >= emulator.memorySize) {
+		printf(TERM_BOLD_RED "Address out of bounds.\n" TERM_RESET);
+	}
+
+	int hits = -1;
+	if (hitsStr) {
+		sscanf(hitsStr, "%i", &hits);
+	}
+
+	emuSetBreakpoint(address, hits);
 }
 
 // Imprime o disassembly das instruções desejadas
@@ -530,17 +608,19 @@ void cliHelpCmd() {
 	printf("\nPressing it in quick succession will " TERM_BOLD_RED "quit" TERM_RESET " the emulator entirely.\n");
 	printf(TERM_CYAN  "\nhelp:" TERM_RESET " prints this help guide.\n");
 	printf(TERM_CYAN  "\nquit, q:" TERM_RESET " quits out of the emulator.\n");
-	printf(TERM_CYAN  "\nstep, s" TERM_BOLD_CYAN " <amount>:");
+	printf(TERM_CYAN  "\nstep, s" TERM_BOLD_CYAN " <amount>");
 	printf(TERM_RESET "\n    Steps through <amount> of instructions and no further.\n");
-	printf(TERM_CYAN  "\ncontinue, c:");
+	printf(TERM_CYAN  "\ncontinue, c");
 	printf(TERM_RESET "\n    Leaves step-through mode and lets the emulator run freely.\n    Execution will be stopped upon encountering a fault or the user\n    pressing CTRL-C.\n");
-	printf(TERM_CYAN  "\nreset:");
+	printf(TERM_CYAN  "\nreset");
 	printf(TERM_RESET "\n    Resets the memory state as it were in the beginning of the emulation\n    and clears all registers.\n");
-	printf(TERM_CYAN  "\nregisters, r:");
+	printf(TERM_CYAN  "\nbreak, b " TERM_BOLD_CYAN "<address> [hits]" TERM_RESET);
+	printf("\n    Sets or unsets a breakpoint at a memory address.\n    If specified, the hits parameter causes the breakpoint to be removed\n    automatically after being hit the specified amount of times.\n");
+	printf(TERM_CYAN  "\nregisters, regs, r");
 	printf(TERM_RESET "\n    View the contents of all CPU registers.\n");
-	printf(TERM_CYAN  "\nmemory, m, x " TERM_BOLD_CYAN "<address> [words]:");
+	printf(TERM_CYAN  "\nmemory, m, x " TERM_BOLD_CYAN "<address> [words]");
 	printf(TERM_RESET "\n    Views the contents of the emulator memory at the given address with an\n    optional amount of words to display.\n");
-	printf(TERM_CYAN  "\ndisassembly, d " TERM_BOLD_CYAN "[address] [amount]:");
+	printf(TERM_CYAN  "\ndisassembly, d " TERM_BOLD_CYAN "[address] [amount]");
 	printf(TERM_RESET "\n    Disassembles the given amount of instructions at the address specified.\n    If no address is specified, prints the current instruction.\n");
 	printf(TERM_CYAN  "\nnobreak:" TERM_RESET " disables emulator pauses on cpu faults.\n");
 	printf(TERM_CYAN  "\ndobreak:" TERM_RESET " reenables emulator pauses on cpu faults.\n");
@@ -556,6 +636,7 @@ void emuInitialize(uint16_t* memory, int memSize) {
 	emulator.stepsLeft = 0;
 	emulator.breaking = false;
 	emulator.breakOnFaults = false;
+	vecInit(&emulator.breakpoints);
 
 	// Salva uma cópia da memória passada em um "snapshot". Esse snapshot é utilizado caso
 	// o usuário realize um 'reset' no emulador
@@ -970,6 +1051,61 @@ StringBuffer emuDisassembly(uint16_t instruction) {
 	return bufferStg;
 }
 
+/// @brief Configura um ponto de parada na memória do emulador.
+/// @param addr Posição na memória onde a execução vai parar.
+/// @param hits Número máximo de vezes que esse breakpoint será acertado antes de ser desativado.
+/// Se o número de hits for -1, o breakpoint é considerado infinito e nunca será desativado.
+/// Se hits for 0, o breakpoint será configurado já desativado.
+void emuSetBreakpoint(uint16_t addr, int hits) {
+	// Se um breakpoint com esse endereço já existe, só mude o número de hits dele
+	for (int i = 0; i < emulator.breakpoints.size; i++) {
+		Breakpoint* bp = (Breakpoint*) emulator.breakpoints.array[i];
+		if (bp->address == addr) {
+			bp->hits = hits;
+			return;
+		}
+	}
+
+	// Cria um novo breakpoint
+	Breakpoint* bp = (Breakpoint*) malloc(sizeof(Breakpoint));
+	bp->address = addr;
+	bp->hits = hits;
+	vecAdd(&emulator.breakpoints, bp);
+}
+
+/// @brief Remove um breakpoint previamente configurado. Se o breakpoint não existe, não faz nada.
+/// @param addr O endereço do breakpoint a remover
+/// @return Um booleano se o breakpoint existia ou não 
+bool emuRemoveBreakpoint(uint16_t addr) {
+	// Faz uma busca linear no vetor de brakpoints e remove o de endereço igual
+	for (int i = 0; i < emulator.breakpoints.size; i++) {
+		Breakpoint* bp = (Breakpoint*)emulator.breakpoints.array;
+
+		if (bp->address == addr) {
+			free(bp);
+			vecRemove(&emulator.breakpoints, i);
+			return true;
+		}
+	}
+
+	return false;
+}
+
+/// @brief Obtém o breakpoint setado no endereço de memória especificado.
+/// @param addr O endereço de memória do emulador do breakpoint a obter.
+/// @return Um ponteiro para estrutura do breakpoint se havia um, NULL se não há breakpoint ali.
+Breakpoint* emuGetBreakpoint(uint16_t addr) {
+	// Faz uma busca linear no vetor de brakpoints e retorna se for encontrado
+	for (int i = 0; i < emulator.breakpoints.size; i++) {
+		Breakpoint* bp = (Breakpoint*)emulator.breakpoints.array[i];
+		if (bp->address == addr) {
+			return bp;
+		}
+	}
+
+	return NULL;
+}
+
 // Verifica se um enderço se memória está dentro dos limites possíveis do tamanho da memória
 // do emulador. Se o endereço estiver fora do limite, causa uma falha e retorna true.
 bool emuGuardAddress(uint16_t addr) {
@@ -1166,4 +1302,54 @@ void stbFree(StringBuffer* sb) {
 	sb->size = 0;
 	sb->capacity = 0;
 	sb->position = 0;
+}
+
+/// @brief Inicializa um vetor dinâmico
+/// @param vec O próprio vetor a ser inicializado
+void vecInit(Vector* vec) {
+	vec->array = (void**) malloc(sizeof(void*));
+	vec->capacity = 1;
+	vec->size = 0;
+}
+
+/// @brief Libera a memória ocupada por um vetor dinâmico e libera todos os ponteiros contidos.
+void vecFree(Vector* vec) {
+	for (int i = 0; i < vec->size; i++) {
+		free(vec->array[i]);
+	}
+	free(vec->array);
+	
+	vec->array = NULL;
+	vec->capacity = -1;
+	vec->size = -1;
+}
+
+/// @brief Cresce a capacidade do vetor
+void vecGrow(Vector* vec) {
+	vec->capacity *= 2;
+	vec->array = realloc(vec->array, sizeof(void*) * vec->capacity);
+}
+
+/// @brief Adiciona um elemento no vetor
+void vecAdd(Vector* vec, void* elem) {
+	if (vec->capacity == vec->size) {
+		vecGrow(vec);
+	}
+
+	vec->array[vec->size] = elem;
+	vec->size++;
+}
+
+/// @brief Remove um um elemento pelo seu índice
+/// @param index O índice do elemento a ser removido 
+void vecRemove(Vector* vec, int index) {
+	// Assegura a validade do índice
+	assert(index < vec->size);
+
+	// Shift all elements to the left by one position
+	for (int i = index; i < vec->size - 1; i++) {
+		vec->array[i] = vec->array[i + 1];
+	}
+
+	vec->size--;
 }

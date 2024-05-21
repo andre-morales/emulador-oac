@@ -10,16 +10,15 @@
 			"request": "launch",
 			"program": "${workspaceFolder}/epd.exe",
 			"args": [
-				"sample1.ram"
+				"sample.mem"
 			],
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}",
 			"environment": [],
-			"externalConsole": false,
+			"externalConsole": true,
 			"MIMode": "gdb",
 			"miDebuggerPath": "gdb",
 			"preLaunchTask": "make-debug"
 		}
-
 	]
 }
