@@ -92,7 +92,6 @@ typedef enum {
 /// @brief Permite a manipulação e concatenação de strings formatadas
 typedef struct StringBufferT {
 	char* buffer;
-	size_t position;
 	size_t size;
 	size_t capacity;
 } StringBuffer;
@@ -133,8 +132,10 @@ StringBuffer emuDisassembly(uint16_t instruction);
 // -- Funções auxiliares de manipulação de strings
 
 void stbInit(StringBuffer*);
+void stbGrow(StringBuffer* sb, size_t minRequiredSize);
 bool stbAppend(StringBuffer*, const char* fmt, ...);
 bool stbAppendv(StringBuffer* sb, const char* fmt, va_list args);
+void stbAppendBuffer(StringBuffer* sb, StringBuffer* buffer);
 void stbFree(StringBuffer*);
 
 // -- Funções de manipulação de vetor dinâmico
@@ -161,8 +162,10 @@ void pause();
 #define TERM_BOLD_MAGENTA	"\033[1;35m"
 #define TERM_BOLD_CYAN		"\033[1;36m"
 #define TERM_BOLD_WHITE		"\033[1;37m"
+#define TERM_RED			"\033[0;31m"
 #define TERM_GREEN			"\033[32m"
 #define TERM_YELLOW			"\033[33m"
+#define TERM_MAGENTA		"\033[0;35m"
 #define TERM_CYAN			"\033[0;36m"
 #define TERM_WHITE			"\033[37m"
 #define TERM_RESET			"\033[0m"
@@ -174,8 +177,10 @@ void pause();
 #define TERM_BOLD_MAGENTA	""
 #define TERM_BOLD_CYAN		""
 #define TERM_BOLD_WHITE		""
+#define TERM_RED			""
 #define TERM_GREEN			""
 #define TERM_YELLOW			""
+#define TERM_MAGENTA		""
 #define TERM_CYAN			""
 #define TERM_RESET			""
 #endif
@@ -342,7 +347,7 @@ void emuCheckBreakpoints() {
 		emulator.stepsLeft = 0;
 		emulator.breaking = true;
 		if (bp->hits > 0) bp->hits--;
-		printf(TERM_GREEN "You've hit a breakpoint at " TERM_YELLOW "0x%0X.\n" TERM_RESET, PC);
+		printf(TERM_GREEN "You've hit a breakpoint at " TERM_YELLOW "0x%03X.\n" TERM_RESET, PC);
 		
 		if (bp->hits > 0) {
 			printf(TERM_GREEN "This breakpoint has" TERM_YELLOW " %i " TERM_GREEN "hits left.\n" TERM_RESET, bp->hits);
@@ -950,10 +955,33 @@ void emuPrintDisassemblyLine(uint16_t address) {
 	uint8_t opcode = (instruction & 0xF000) >> 12;
 	uint16_t argument = (instruction & 0x0FFF);
 
+	// Buffer de strings para imprimir a mensagem de uma vez só
+	StringBuffer msgBuffer;
+	stbInit(&msgBuffer);
+
+	// Obtém o breakpoint configurado nesse endereço se houver
+	Breakpoint* bp = emuGetBreakpoint(address);
+
+	// Se houver um breakpoint desativado, imprime o endereço em roxo
+	// Se houver um ativo, imprime em vermelho
+	// Caso contrário, imprime em branco
+	if (bp) {
+		if (bp->hits == 0) {
+			stbAppend(&msgBuffer, TERM_BOLD_MAGENTA "*%3Xh* " TERM_MAGENTA "%X.%03X: ", address, opcode, argument);
+		} else {
+			stbAppend(&msgBuffer, TERM_BOLD_RED "*%3Xh* " TERM_RED "%X.%03X: ", address, opcode, argument);
+		}
+	} else {
+		stbAppend(&msgBuffer, TERM_BOLD_WHITE "[%3Xh] " TERM_RESET "%X.%03X: ", address, opcode, argument);
+	}
+	
 	// Transforma a instrução em string
 	StringBuffer sb = emuDisassembly(instruction);
-	printf(TERM_BOLD_WHITE "[%3Xh] " TERM_RESET "%X.%03X: " TERM_CYAN "%s" TERM_RESET "\n", address, opcode, argument, sb.buffer);
+	stbAppendBuffer(&msgBuffer, &sb);
+
+	printf(TERM_CYAN "%s" TERM_RESET "\n", msgBuffer.buffer);
 	stbFree(&sb);
+	stbFree(&msgBuffer);
 }
 
 // Retorna uma string que representa o disassembly da instrução passada
@@ -1252,10 +1280,19 @@ void pause() {
 
 /// Inicializa um buffer de strings.
 void stbInit(StringBuffer* sb) {
-	sb->capacity = 512;
-	sb->position = 0;
+	sb->capacity = 2;
 	sb->size = 0;
-	sb->buffer = (char*) malloc(sizeof(char) * sb->capacity);
+	sb->buffer = (char*) calloc(sb->capacity, sizeof(char));
+}
+
+/// @brief Expande um buffer de strings
+/// @param sb O buffer em si
+/// @param minRequiredSize O buffer deve crescer no mínimo o suficiente para conter esse valor
+void stbGrow(StringBuffer* sb, size_t minRequiredSize) {
+	size_t growthAmount = minRequiredSize * 2;
+	if (growthAmount == 0) growthAmount = 4;
+	sb->capacity += growthAmount;
+	sb->buffer = (char*) realloc(sb->buffer, sb->capacity * sizeof(char));
 }
 
 /// @brief Concatena no buffer uma string formatada
@@ -1278,22 +1315,50 @@ bool stbAppend(StringBuffer* sb, const char* fmt, ...) {
 /// @param args A lista de argumentos.
 /// @return Verdadeiro se a concatenação foi bem sucedida, falso caso contrário.
 bool stbAppendv(StringBuffer* sb, const char* fmt, va_list args) {
-	char* ptr = sb->buffer + sb->position;
-	size_t len = sb->capacity - sb->size;
+	// Obtém um ponteiro para a posição atual do buffer e a capacidade restante
+	char* ptr = &sb->buffer[sb->size];
+	size_t remaining = sb->capacity - sb->size;
 
-	int written = vsnprintf(ptr, len, fmt, args);
+	// Tenta escrever no buffer sem aumentar o tamanho
+	int strSize = vsnprintf(ptr, remaining, fmt, args);
 
 	// Erro de formatação. Não foi escrito nada
-	if (written < 0) return false;
-
-	// Tamanho do buffer insuficiente
-	if (written >= len) {
-		return false;
-	}
+	if (strSize < 0) return false;
 
 	// Escrita bem sucedida
-	sb->position += written;
+	if (strSize < remaining) {
+		sb->size += strSize;
+		return true;
+	}
+
+	// Expandimos o buffer e tentamos escrever no buffer mais uma vez
+	stbGrow(sb, strSize);
+	ptr = sb->buffer + sb->size;
+	remaining = sb->capacity - sb->size;
+	strSize = vsnprintf(ptr, remaining, fmt, args);
+
+	// Erro de formatação ou algum outro erro
+	if (strSize < 0) return false;
+
+	// Buffer insuficiente
+	if (strSize > remaining) return false;
+
+	sb->size += strSize;
 	return true;
+}
+
+/// @brief Anexa os conteúdos de outro buffer a este buffer
+/// @param sb O buffer a ser expandido com conteúdos
+/// @param buffer O buffer a ser adicionado ao primeiro
+void stbAppendBuffer(StringBuffer* sb, StringBuffer* buffer) {
+	size_t newSize = sb->size + buffer->size;
+	if (sb->capacity < newSize) {
+		stbGrow(sb, newSize);
+	}
+
+	char* dst = sb->buffer + sb->size;
+	strcpy(dst, buffer->buffer);
+	sb->size += buffer->size;
 }
 
 /// Libera a memória utilizada pelo buffer de strings
@@ -1301,7 +1366,6 @@ void stbFree(StringBuffer* sb) {
 	free(sb->buffer);
 	sb->size = 0;
 	sb->capacity = 0;
-	sb->position = 0;
 }
 
 /// @brief Inicializa um vetor dinâmico
