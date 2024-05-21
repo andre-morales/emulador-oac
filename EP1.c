@@ -483,7 +483,7 @@ CliControl cliWaitUserCommand() {
 
 // Desabilita o modo step-through e deixa o emulador voltar a execução
 void cliContinueCmd() {
-	printf("Resuming execution...\n");
+	printf(TERM_GREEN "Resuming execution...\n" TERM_RESET);
 	emulator.breaking = false;
 }
 
@@ -498,29 +498,29 @@ void cliStepCmd() {
 	}
 }
 
-/// @brief Comando break <address> [hits] do emulador
+/// @brief Comando break [address] [hits] do emulador
 void cliBreakpointCmd() {
 	char* addressStr = strtok(NULL, " ");
 	char* hitsStr = strtok(NULL, " ");
 
-	if (!addressStr) {
-		printf(TERM_BOLD_RED "A memory point must be passed to this command.\n" TERM_RESET);
-		return;
-	}
+	int address = emulator.registers->PC;
+	int hits = -1;
 
-	int address = -1;
-	sscanf(addressStr, "%x", &address);
+	if (addressStr) {
+		sscanf(addressStr, "%x", &address);
+	}
+	
+	if (hitsStr) {
+		sscanf(hitsStr, "%i", &hits);
+	}
 
 	if (address < 0 || address >= emulator.memorySize) {
 		printf(TERM_BOLD_RED "Address out of bounds.\n" TERM_RESET);
 	}
 
-	int hits = -1;
-	if (hitsStr) {
-		sscanf(hitsStr, "%i", &hits);
-	}
-
 	emuSetBreakpoint(address, hits);
+
+	printf(TERM_GREEN "Breakpoint set at" TERM_YELLOW " 0x%03X.\n" TERM_RESET, address);
 }
 
 // Imprime o disassembly das instruções desejadas
@@ -614,8 +614,8 @@ void cliHelpCmd() {
 	printf(TERM_RESET "\n    Leaves step-through mode and lets the emulator run freely.\n    Execution will be stopped upon encountering a fault or the user\n    pressing CTRL-C.\n");
 	printf(TERM_CYAN  "\nreset");
 	printf(TERM_RESET "\n    Resets the memory state as it were in the beginning of the emulation\n    and clears all registers.\n");
-	printf(TERM_CYAN  "\nbreak, b " TERM_BOLD_CYAN "<address> [hits]" TERM_RESET);
-	printf("\n    Sets or unsets a breakpoint at a memory address.\n    If specified, the hits parameter causes the breakpoint to be removed\n    automatically after being hit the specified amount of times.\n");
+	printf(TERM_CYAN  "\nbreak, b " TERM_BOLD_CYAN "[address] [hits]" TERM_RESET);
+	printf("\n    Sets or unsets a breakpoint at a memory address.\n    If no address is specified, the breakpoint will be set at the current location.\n    The optional hits parameter causes the breakpoint to be disabled\n    automatically after being hit the specified amount of times.\n");
 	printf(TERM_CYAN  "\nregisters, regs, r");
 	printf(TERM_RESET "\n    View the contents of all CPU registers.\n");
 	printf(TERM_CYAN  "\nmemory, m, x " TERM_BOLD_CYAN "<address> [words]");
