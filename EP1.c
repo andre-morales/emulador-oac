@@ -6,7 +6,7 @@
  * 
  * Autor: André Morales
  * Criação: 17/05/2024
- * Modificação: 19/05/204
+ * Modificação: 21/05/204
  * */
 #include "driverEP1.h"
 #include <stdio.h>
@@ -1267,6 +1267,7 @@ bool getBit(uint16_t value, int bit) {
 	return (value >> bit) & 1UL;
 }
 
+/// @brief Converte toda uma string para minúsculo
 void toLowerCase(char* str) {
 	while (*str) {
 		*str = tolower(*str);
@@ -1274,6 +1275,7 @@ void toLowerCase(char* str) {
 	}
 }
 
+/// @brief Verifica se duas strings são iguais
 bool strEquals(const char* a, const char* b) {
 	return strcmp(a, b) == 0;
 }

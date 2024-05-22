@@ -9,7 +9,12 @@
 			"command": "make",
 			"args": [
 				"debug"
-			]
+			],
+			"problemMatcher": [],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
 		}
 	]
 }
