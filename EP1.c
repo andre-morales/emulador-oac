@@ -91,7 +91,7 @@ typedef enum {
 
 /// @brief Permite a manipulação e concatenação de strings formatadas
 typedef struct StringBufferT {
-	char* buffer;
+	char* array;
 	size_t size;
 	size_t capacity;
 } StringBuffer;
@@ -100,6 +100,7 @@ typedef struct StringBufferT {
 
 void cliPrintWelcome();
 CliControl cliBeforeExecute();
+void emuCheckBreakpoints();
 CliControl cliWaitUserCommand();
 void cliInstallIntHandler();
 void cliStepCmd();
@@ -136,14 +137,17 @@ void stbGrow(StringBuffer* sb, size_t minRequiredSize);
 bool stbAppend(StringBuffer*, const char* fmt, ...);
 bool stbAppendv(StringBuffer* sb, const char* fmt, va_list args);
 void stbAppendBuffer(StringBuffer* sb, StringBuffer* buffer);
+void stbColorize(StringBuffer* sb);
 void stbFree(StringBuffer*);
 
 // -- Funções de manipulação de vetor dinâmico
 
+void vecInit(Vector* vec);
 void vecFree(Vector* vec);
 void vecGrow(Vector* vec);
 void vecAdd(Vector* vec, void* elem);
 void vecRemove(Vector* vec, int index);
+void prints(const char* fmt, ...);
 
 // -- Funções auxiliares genéricas
 
@@ -151,7 +155,6 @@ bool strEquals(const char* a, const char* b);
 void setBit(uint16_t* reg, int bit, bool value);
 bool getBit(uint16_t value, int bit);
 void toLowerCase(char* str);
-void pause();
 
 // -- Sequências de escape para as cores no console
 #if ENABLE_COLORS
@@ -300,7 +303,7 @@ int processa(short unsigned int* m, int memSize) {
 
 // Imprime o cabeçalho de boas vindas
 void cliPrintWelcome() {
-	printf(TERM_CYAN "\n---- PROTO EMULATOR V1.01 ----\n");
+	printf(TERM_CYAN "\n---- PROTO EMULATOR V1.1 ----\n");
 	printf("Author: " TERM_BOLD_MAGENTA "André Morales\n");
 	printf("\tgithub.com/andre-morales\n\n" TERM_RESET);
 }
@@ -613,20 +616,20 @@ void cliHelpCmd() {
 	printf("\nPressing it in quick succession will " TERM_BOLD_RED "quit" TERM_RESET " the emulator entirely.\n");
 	printf(TERM_CYAN  "\nhelp:" TERM_RESET " prints this help guide.\n");
 	printf(TERM_CYAN  "\nquit, q:" TERM_RESET " quits out of the emulator.\n");
-	printf(TERM_CYAN  "\nstep, s" TERM_BOLD_CYAN " <amount>");
-	printf(TERM_RESET "\n    Steps through <amount> of instructions and no further.\n");
+	prints("\n§6step, s§E <amount>§R");
+	prints("\n    Steps through§E amount§R of instructions and no further.\n");
 	printf(TERM_CYAN  "\ncontinue, c");
 	printf(TERM_RESET "\n    Leaves step-through mode and lets the emulator run freely.\n    Execution will be stopped upon encountering a fault or the user\n    pressing CTRL-C.\n");
 	printf(TERM_CYAN  "\nreset");
 	printf(TERM_RESET "\n    Resets the memory state as it were in the beginning of the emulation\n    and clears all registers.\n");
-	printf(TERM_CYAN  "\nbreak, b " TERM_BOLD_CYAN "[address] [hits]" TERM_RESET);
-	printf("\n    Sets or unsets a breakpoint at a memory address.\n    If no address is specified, the breakpoint will be set at the current location.\n    The optional hits parameter causes the breakpoint to be disabled\n    automatically after being hit the specified amount of times.\n");
+	prints("\n§6break, b§E [address] [hits]§R");
+	prints("\n    Sets or unsets a breakpoint at a memory§E address§R.\n    If no address is specified, the breakpoint will be set at the current location.\n    The optional§E hits§R parameter causes the breakpoint to be disabled\n    automatically after being hit the specified amount of times.\n");
 	printf(TERM_CYAN  "\nregisters, regs, r");
 	printf(TERM_RESET "\n    View the contents of all CPU registers.\n");
-	printf(TERM_CYAN  "\nmemory, m, x " TERM_BOLD_CYAN "<address> [words]");
-	printf(TERM_RESET "\n    Views the contents of the emulator memory at the given address with an\n    optional amount of words to display.\n");
-	printf(TERM_CYAN  "\ndisassembly, d " TERM_BOLD_CYAN "[address] [amount]");
-	printf(TERM_RESET "\n    Disassembles the given amount of instructions at the address specified.\n    If no address is specified, prints the current instruction.\n");
+	prints("\n§6memory, m, x§E <address> [words]§R");
+	prints("\n    Views the contents of the emulator memory at the given§E address§R with an\n    optional amount of§E words§R to display.\n");
+	prints("\n§6disassembly, d§E [address] [amount]§R");
+	prints("\n    Disassembles the given§E amount§R of instructions at the§E address§R specified.\n    If no address is specified, prints the current instruction.\n");
 	printf(TERM_CYAN  "\nnobreak:" TERM_RESET " disables emulator pauses on cpu faults.\n");
 	printf(TERM_CYAN  "\ndobreak:" TERM_RESET " reenables emulator pauses on cpu faults.\n");
 }
@@ -962,25 +965,28 @@ void emuPrintDisassemblyLine(uint16_t address) {
 	// Obtém o breakpoint configurado nesse endereço se houver
 	Breakpoint* bp = emuGetBreakpoint(address);
 
-	// Se houver um breakpoint desativado, imprime o endereço em roxo
-	// Se houver um ativo, imprime em vermelho
-	// Caso contrário, imprime em branco
 	if (bp) {
 		if (bp->hits == 0) {
-			stbAppend(&msgBuffer, TERM_BOLD_MAGENTA "*%3Xh* " TERM_MAGENTA "%X.%03X: ", address, opcode, argument);
+			// Se houver um breakpoint desativado, imprime o endereço em roxo
+			stbAppend(&msgBuffer, "§D{%3Xh}§5 ", address);
 		} else {
-			stbAppend(&msgBuffer, TERM_BOLD_RED "*%3Xh* " TERM_RED "%X.%03X: ", address, opcode, argument);
+			// Se ele for ativo, imprime em vermelho
+			stbAppend(&msgBuffer, "§9{%3Xh}§1 ", address);
 		}
 	} else {
-		stbAppend(&msgBuffer, TERM_BOLD_WHITE "[%3Xh] " TERM_RESET "%X.%03X: ", address, opcode, argument);
+		// Caso contrário, imprime em branco
+		stbAppend(&msgBuffer, "§F[%3Xh]§R ", address);
 	}
-	
-	// Transforma a instrução em string
-	StringBuffer sb = emuDisassembly(instruction);
-	stbAppendBuffer(&msgBuffer, &sb);
 
-	printf(TERM_CYAN "%s" TERM_RESET "\n", msgBuffer.buffer);
-	stbFree(&sb);
+	stbAppend(&msgBuffer, "%X.%03X: ", address, opcode, argument);
+	
+	// Transforma a instrução em string e adiciona na string da mensagem
+	StringBuffer disassembly = emuDisassembly(instruction);
+	stbAppendBuffer(&msgBuffer, &disassembly);
+	stbFree(&disassembly);
+
+	stbColorize(&msgBuffer);
+	printf("%s\n" TERM_RESET, msgBuffer.array);
 	stbFree(&msgBuffer);
 }
 
@@ -1165,7 +1171,7 @@ void emuFault(const char* fmt, ...) {
 	stbAppend(&sb, TERM_BOLD_RED TERM_BOLD_RED "[ERR!] CPU FAULT: " TERM_RESET);
 	stbAppendv(&sb, fmt, args);
 	stbAppend(&sb, "\n");
-	printf("%s\n", sb.buffer);
+	printf("%s\n", sb.array);
 	stbFree(&sb);
 
 	// Coloca o emulador em modo step-through e interrompe qualquer sequência de steps se havia
@@ -1189,7 +1195,7 @@ void emuWarn(const char* fmt, ...) {
 	stbAppend(&sb, TERM_BOLD_YELLOW "[WRN!] " TERM_RESET);
 	stbAppendv(&sb, fmt, args);
 	
-	printf("%s\n\n", sb.buffer);
+	printf("%s\n\n", sb.array);
 	stbFree(&sb);
 
 	va_end(args);
@@ -1272,27 +1278,25 @@ bool strEquals(const char* a, const char* b) {
 	return strcmp(a, b) == 0;
 }
 
-void pause() {
-	getchar();
-}
-
 // -- Funções de manipulação de StringBuffer --
 
 /// Inicializa um buffer de strings.
 void stbInit(StringBuffer* sb) {
 	sb->capacity = 2;
 	sb->size = 0;
-	sb->buffer = (char*) calloc(sb->capacity, sizeof(char));
+	sb->array = (char*) calloc(sb->capacity, sizeof(char));
 }
 
 /// @brief Expande um buffer de strings
 /// @param sb O buffer em si
 /// @param minRequiredSize O buffer deve crescer no mínimo o suficiente para conter esse valor
 void stbGrow(StringBuffer* sb, size_t minRequiredSize) {
+	// Heurística para determinar o fator de crescimento
 	size_t growthAmount = minRequiredSize * 2;
-	if (growthAmount == 0) growthAmount = 4;
+	if (growthAmount < 8) growthAmount = 8;
+
 	sb->capacity += growthAmount;
-	sb->buffer = (char*) realloc(sb->buffer, sb->capacity * sizeof(char));
+	sb->array = (char*) realloc(sb->array, sb->capacity * sizeof(char));
 }
 
 /// @brief Concatena no buffer uma string formatada
@@ -1316,7 +1320,7 @@ bool stbAppend(StringBuffer* sb, const char* fmt, ...) {
 /// @return Verdadeiro se a concatenação foi bem sucedida, falso caso contrário.
 bool stbAppendv(StringBuffer* sb, const char* fmt, va_list args) {
 	// Obtém um ponteiro para a posição atual do buffer e a capacidade restante
-	char* ptr = &sb->buffer[sb->size];
+	char* ptr = &sb->array[sb->size];
 	size_t remaining = sb->capacity - sb->size;
 
 	// Tenta escrever no buffer sem aumentar o tamanho
@@ -1333,16 +1337,14 @@ bool stbAppendv(StringBuffer* sb, const char* fmt, va_list args) {
 
 	// Expandimos o buffer e tentamos escrever no buffer mais uma vez
 	stbGrow(sb, strSize);
-	ptr = sb->buffer + sb->size;
+	ptr = sb->array + sb->size;
 	remaining = sb->capacity - sb->size;
 	strSize = vsnprintf(ptr, remaining, fmt, args);
 
 	// Erro de formatação ou algum outro erro
 	if (strSize < 0) return false;
 
-	// Buffer insuficiente
-	if (strSize > remaining) return false;
-
+	assert(strSize < remaining);
 	sb->size += strSize;
 	return true;
 }
@@ -1356,14 +1358,52 @@ void stbAppendBuffer(StringBuffer* sb, StringBuffer* buffer) {
 		stbGrow(sb, newSize);
 	}
 
-	char* dst = sb->buffer + sb->size;
-	strcpy(dst, buffer->buffer);
+	char* dst = sb->array + sb->size;
+	strcpy(dst, buffer->array);
 	sb->size += buffer->size;
+}
+
+/// @brief Substitui os símbols §X de cores pelos códigos ANSI necessários para gerar as cores.
+void stbColorize(StringBuffer* buffer) {
+	// Rouba o array de caracteres e reinicializa o buffer do usuário
+	char* array = buffer->array;
+	buffer->array = NULL;
+	stbFree(buffer);
+	stbInit(buffer);
+
+	// Adiciona a primeira parte da string, anterior possívelmente ao símbolo §
+	char* token = strtok(array, "§");
+	if (array[0] == token[0]) {
+		stbAppend(buffer, token);
+		token = strtok(NULL, "§");
+	}
+
+	// Itera todas as partes da string precedidas de §
+	while (token) {
+		int color = token[0];
+		#if ENABLE_COLORS
+		if (color == 'R') {
+			stbAppend(buffer, "\033[0m");
+		} else if (color >= '8') {
+			if (color >= 'A') color -= 'A' - 2;
+			else color -= '8';
+			stbAppend(buffer, "\033[1;%im", 30 + color);
+		} else {
+			color -= '0';
+			stbAppend(buffer, "\033[0;%im", 30 + color);
+		}
+		#endif
+
+		stbAppend(buffer, token + 1);
+
+		token = strtok(NULL, "§");
+	}
 }
 
 /// Libera a memória utilizada pelo buffer de strings
 void stbFree(StringBuffer* sb) {
-	free(sb->buffer);
+	free(sb->array);
+	sb->array = NULL;
 	sb->size = 0;
 	sb->capacity = 0;
 }
@@ -1416,4 +1456,21 @@ void vecRemove(Vector* vec, int index) {
 	}
 
 	vec->size--;
+}
+
+/// @brief Imprime uma string formatada no console utilizando § para as cores estilizadas.
+void prints(const char* fmt, ...) {
+	va_list args;
+	va_start(args, fmt);
+
+	StringBuffer buffer;
+	stbInit(&buffer);
+
+	stbAppendv(&buffer, fmt, args);
+	stbColorize(&buffer);
+	printf("%s", buffer.array);
+
+	stbFree(&buffer);
+
+	va_end(args);
 }
