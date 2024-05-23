@@ -42,6 +42,29 @@
 // Configura se a ocorrência de loop-around na memória gera uma fault ou apenas um aviso
 #define FAULT_ON_LOOP_AROUND 1
 
+/// @brief Opcodes de 4 bits de todas as instruções do processador.
+typedef enum {
+	OPCODE_NOP  = 0b0000,
+	OPCODE_LDA  = 0b0001,
+	OPCODE_STA  = 0b0010,
+	OPCODE_JMP  = 0b0011,
+	OPCODE_JNZ  = 0b0100,
+	OPCODE_RET  = 0b0101,
+	OPCODE_ARIT = 0b0110,
+	OPCODE_HLT  = 0b1111
+} Opcode;
+
+typedef enum {
+	ARIT_SET0 = 0b000,
+	ARIT_SETF = 0b001,
+	ARIT_NOT  = 0b010,
+	ARIT_AND  = 0b011,
+	ARIT_OR   = 0b100,
+	ARIT_XOR  = 0b101,
+	ARIT_ADD  = 0b110,
+	ARIT_SUB  = 0b111
+} AritOp;
+
 // Definição dos registradores do processador
 typedef struct {
 	uint16_t RI;
@@ -303,7 +326,7 @@ int processa(short unsigned int* m, int memSize) {
 
 // Imprime o cabeçalho de boas vindas
 void cliPrintWelcome() {
-	printf(TERM_CYAN "\n---- PROTO EMULATOR V1.1 ----\n");
+	printf(TERM_CYAN "\n---- PROTO EMULATOR V1.1a ----\n");
 	printf("Author: " TERM_BOLD_MAGENTA "André Morales\n");
 	printf("\tgithub.com/andre-morales\n\n" TERM_RESET);
 }
@@ -723,18 +746,17 @@ EmuResult emuExecute(uint16_t instruction) {
 
 	// Extrai da instrução os 4 bits do código de operação
 	// e os bits do argumento X da instrução
-	uint8_t opcode =    (instruction & 0xF000) >> 12;
-	uint16_t argument = (instruction & 0x0FFF);
+	uint8_t opcodeBits = (instruction & 0xF000) >> 12;
+	uint16_t argument =  (instruction & 0x0FFF);
 
+	Opcode opcode = (Opcode)opcodeBits;
 	switch(opcode) {
-	// NOP -- Opcode (0000)b
 	// Não faz nada
-	case 0x0:
+	case OPCODE_NOP:
 		break;
 
-	// LDA(x) -- Opcode (0001)b
 	// Carrega o acumulador (A) com o conteúdo da memória em X
-	case 0x1: {
+	case OPCODE_LDA: {
 		// Garante a validade do endereço de memória X
 		if (emuGuardAddress(argument)) return EMU_FAULT;
 
@@ -742,9 +764,8 @@ EmuResult emuExecute(uint16_t instruction) {
 		break;
 	}
 
-	// STA(x) -- Opcode (0010)b
 	// Armazena no endereço imediato X o valor do acumulador A
-	case 0x2: {
+	case OPCODE_STA: {
 		// Garante a validade do endereço de memória X
 		if (emuGuardAddress(argument)) return EMU_FAULT;
 
@@ -752,9 +773,8 @@ EmuResult emuExecute(uint16_t instruction) {
 		break;
 	}
 
-	// JMP(x) -- Opcode (0011)b
 	// Pula incondicionalmente para o endereço imediato X
-	case 0x3: {
+	case OPCODE_JMP: {
 		// Garante que o destino X de salto é válido
 		if (emuGuardAddress(argument)) return EMU_FAULT;
 
@@ -767,10 +787,9 @@ EmuResult emuExecute(uint16_t instruction) {
 		break;
 	}
 
-	// JNZ(x) -- Opcode (0100)b
 	// Se o acumulador for != de 0, armazena o endereço da próxima instrução em R e salta para
 	// o endereço especificado no argumento X
-	case 0x4: {
+	case OPCODE_JNZ: {
 		// Garante que o destino X de salto é válido
 		if (emuGuardAddress(argument)) return EMU_FAULT;
 
@@ -786,8 +805,8 @@ EmuResult emuExecute(uint16_t instruction) {
 		break;
 	}
 
-	// RET -- Opcode (0101b)
-	case 0x5: {
+	// Salva em R um endereço de retorno e pula para o conteúdo de R anterior.
+	case OPCODE_RET: {
 		// Garante que o endereço de retorno será válido
 		if (emuGuardAddress(regs->R)) return EMU_FAULT;
 
@@ -799,15 +818,13 @@ EmuResult emuExecute(uint16_t instruction) {
 		break;
 	}
 
-	// ARIT(x) -- Opcode (0110)b
 	// Executa uma operação aritmética.
-	case 0x6:
+	case OPCODE_ARIT:
 		emuDoArit(argument);
 		break;
 
-	// HLT - Opcode (1111)b
 	// Interrompe a execução do processador
-	case 0xF:
+	case OPCODE_HLT:
 		return EMU_HALT;
 
 	// Instrução desconhecida
@@ -872,25 +889,25 @@ void emuDoArit(uint16_t argument) {
 	uint16_t op2 = (regOp2) ? *regOp2 : 0;
 
 	switch(bitsOpr) {
-	case 0:
+	case ARIT_SET0:
 		*regDst = 0x0000;
 		break;
-	case 1:
+	case ARIT_SETF:
 		*regDst = 0xFFFF;
 		break;
-	case 2:
+	case ARIT_NOT:
 		*regDst = ~op1;
 		break;
-	case 3:
+	case ARIT_AND:
 		*regDst = op1 & op2;
 		break;
-	case 4:
+	case ARIT_OR:
 		*regDst = op1 | op2;
 		break;
-	case 5:
+	case ARIT_XOR:
 		*regDst = op1 ^ op2;
 		break;
-	case 6:
+	case ARIT_ADD:
 		// Salva a soma já truncada no registrador
 		uint32_t sum = op1 + op2;
 		*regDst = (uint16_t)sum;
@@ -899,7 +916,7 @@ void emuDoArit(uint16_t argument) {
 		bool overflowed = sum > 0xFFFF;
 		setBit(PSW, 15, overflowed);
 		break;
-	case 7:
+	case ARIT_SUB:
 		// Salva a subtração truncada no registrador
 		*regDst = op1 - op2;
 
@@ -978,7 +995,7 @@ void emuPrintDisassemblyLine(uint16_t address) {
 		stbAppend(&msgBuffer, "§F[%3Xh]§R ", address);
 	}
 
-	stbAppend(&msgBuffer, "%X.%03X: ", address, opcode, argument);
+	stbAppend(&msgBuffer, "%X.%03X: ", opcode, argument);
 	
 	// Transforma a instrução em string e adiciona na string da mensagem
 	StringBuffer disassembly = emuDisassembly(instruction);
@@ -1008,38 +1025,31 @@ StringBuffer emuDisassembly(uint16_t instruction) {
 	stbAppend(buffer, TERM_CYAN);
 
 	switch(opcode) {
-	// NOP -- 0000b
-	case 0x0:
+	case OPCODE_NOP:
 		stbAppend(buffer, TERM_BOLD_BLACK "%s ", name);
 		break;
 
-	// LDA(x) -- 0001b
-	case 0x1:
+	case OPCODE_LDA:
 		stbAppend(buffer, "%s [%Xh]", name, argument);
 		break;
 
-	// STA(x) -- 0010b
-	case 0x2:
+	case OPCODE_STA:
 		stbAppend(buffer, "%s [%Xh]", name, argument);
 		break;
 
-	// JMP(x) -- 0011b
-	case 0x3:
+	case OPCODE_JMP:
 		stbAppend(buffer, "%s %Xh", name, argument);
 		break;
 
-	// JNZ(x) -- 0100b
-	case 0x4:
+	case OPCODE_JNZ:
 		stbAppend(buffer, "%s %Xh", name, argument);
 		break;
 
-	// RET 
-	case 0x5:
+	case OPCODE_RET:
 		stbAppend(buffer, "%s", name);
 		break;
 
-	// ARIT(opr, dst, op1, op2) -- 0110b
-	case 0x6:
+	case OPCODE_ARIT:
 		stbAppend(buffer, "%s ", name);
 
 		// Extração dos bits respectivamente:
@@ -1071,8 +1081,7 @@ StringBuffer emuDisassembly(uint16_t instruction) {
 		}
 		break;
 
-	// HLT - 1111b
-	case 0xF:
+	case OPCODE_HLT:
 		stbAppend(buffer, "%s", name);
 		break;
 
