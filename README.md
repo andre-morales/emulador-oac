@@ -1,19 +1,17 @@
-# Emulador e Depurador do Processador de OAC-I
+# :gear: Emulador e Depurador do Processador de OAC-I
 
 Esse projeto implementa um emulador interativo completo do processador 16 bits visto na disciplina ministrada pelo professor Fábio Nakano.
 O programa aceita como entrada os conteúdos da memória préviamente programada no simulador e executa sequencialmente as instruções, simulando o processador do Logisim.
 
-## Uso
+![Prompt de comando com exemplo de saída do emulador](./img/exemplo.png)
+
+## :arrow_forward: Uso
 Este emulador permite controlar a execução do programa em qualquer ponto e visualizar o estado do processador e da memória através dos comandos de depuração.
 Todos os comandos podem ser vistos com o emulador parado e digitando ```help``` no prompt.
 
 ![Prompt de comando com o resultado da execução do comando "help"](./img/help.png)
 
-## Exemplo
-![Prompt de comando com exemplo de saída do emulador](./img/exemplo.png)
-
-
-## Compilação
+## :package: Compilação
 Para compilar o emulador, deve-se obter os arquivos **driverEP1.c** e **driverEP1.h** disponíveis no repositório ( https://github.com/fnakano/oac1 ) do professor.
 
 O **Makefile** aqui disponibilizado já vem pronto para compilação, depuração e para alguns testes usando os arquivos de memória **.mem** também disponíveis no repositório mencionado.
