@@ -275,7 +275,7 @@ static bool extendedNotation = false;
 /// @brief Entrada principal do programa. Essa função é chamada com um bloco de memória que corresponde ao
 /// estado inicial da memória do programa a ser emulado.
 /// O bloco de memória é válido durante toda a função principal.
-int processa(short unsigned int* m, int memSize) {
+int processa(short int* m, int memSize) {
 	uint16_t* memory = (uint16_t*)m;
 
 	// Imprime o cabeçalho de boas vindas
@@ -1335,7 +1335,10 @@ bool stbAppendv(StringBuffer* sb, const char* fmt, va_list args) {
 	size_t remaining = sb->capacity - sb->size;
 
 	// Tenta escrever no buffer sem aumentar o tamanho
-	int strSize = vsnprintf(ptr, remaining, fmt, args);
+	va_list argsCopy;
+	va_copy(argsCopy, args);
+	int strSize = vsnprintf(ptr, remaining, fmt, argsCopy);
+	va_end(argsCopy);
 
 	// Erro de formatação. Não foi escrito nada
 	if (strSize < 0) return false;
@@ -1350,7 +1353,10 @@ bool stbAppendv(StringBuffer* sb, const char* fmt, va_list args) {
 	stbGrow(sb, strSize);
 	ptr = sb->array + sb->size;
 	remaining = sb->capacity - sb->size;
+	va_list argsCopy2;
+	va_copy(argsCopy2, args);
 	strSize = vsnprintf(ptr, remaining, fmt, args);
+	va_end(argsCopy2);
 
 	// Erro de formatação ou algum outro erro
 	if (strSize < 0) return false;
