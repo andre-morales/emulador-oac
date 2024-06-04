@@ -7,18 +7,7 @@
  * Autor: André Morales
  * Criação: 17/05/2024
  * Modificação: 04/06/2024
- * */
-#include "driverEP1.h"
-#include "StringBuffer.h"
-#include <stdio.h>
-#include <stdint.h>
-#include <stdarg.h>
-#include <stdbool.h>
-#include <assert.h>
-#include <signal.h>
-#include <ctype.h>
-#include <time.h>
-#include <stdlib.h>
+ **/
 
 // Se configurado como 1, desativa todos os recursos interativos do emulador e o coloca em um modo
 // de "apenas execução". Esse modo é usado em testes automatizados. 
@@ -42,6 +31,19 @@
 
 // Configura se a ocorrência de loop-around na memória gera uma fault ou apenas um aviso
 #define FAULT_ON_LOOP_AROUND 1
+
+#include "driverEP1.h"
+#include "StringBuffer.h"
+#include "Colors.h"
+#include <stdio.h>
+#include <stdint.h>
+#include <stdarg.h>
+#include <stdbool.h>
+#include <assert.h>
+#include <signal.h>
+#include <ctype.h>
+#include <time.h>
+#include <stdlib.h>
 
 /// @brief Opcodes de 4 bits de todas as instruções do processador.
 typedef enum {
@@ -162,38 +164,6 @@ bool strEquals(const char* a, const char* b);
 void setBit(uint16_t* reg, int bit, bool value);
 bool getBit(uint16_t value, int bit);
 void toLowerCase(char* str);
-
-// -- Sequências de escape para as cores no console
-#if ENABLE_COLORS
-#define TERM_BOLD_BLACK		"\033[1;30m"
-#define TERM_BOLD_RED		"\033[1;31m"
-#define TERM_BOLD_GREEN		"\033[1;32m"
-#define TERM_BOLD_YELLOW	"\033[1;33m"
-#define TERM_BOLD_MAGENTA	"\033[1;35m"
-#define TERM_BOLD_CYAN		"\033[1;36m"
-#define TERM_BOLD_WHITE		"\033[1;37m"
-#define TERM_RED			"\033[0;31m"
-#define TERM_GREEN			"\033[32m"
-#define TERM_YELLOW			"\033[33m"
-#define TERM_MAGENTA		"\033[0;35m"
-#define TERM_CYAN			"\033[0;36m"
-#define TERM_WHITE			"\033[37m"
-#define TERM_RESET			"\033[0m"
-#else
-#define TERM_BOLD_BLACK		""
-#define TERM_BOLD_RED		""
-#define TERM_BOLD_GREEN		""
-#define TERM_BOLD_YELLOW	""
-#define TERM_BOLD_MAGENTA	""
-#define TERM_BOLD_CYAN		""
-#define TERM_BOLD_WHITE		""
-#define TERM_RED			""
-#define TERM_GREEN			""
-#define TERM_YELLOW			""
-#define TERM_MAGENTA		""
-#define TERM_CYAN			""
-#define TERM_RESET			""
-#endif
 
 // Tabela com o nome das intruções para cada opcode
 static const char* const INSTRUCTION_NAMES[] = {
