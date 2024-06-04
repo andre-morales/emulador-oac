@@ -2,3 +2,4 @@ driverEP1.c
 driverEP1.h
 *.exe
 tests/
+*.o
