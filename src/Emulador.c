@@ -34,16 +34,16 @@
 
 #include "driverEP1.h"
 #include "StringBuffer.h"
+#include "Util.h"
 #include "Colors.h"
+#include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <assert.h>
 #include <signal.h>
-#include <ctype.h>
 #include <time.h>
-#include <stdlib.h>
 
 /// @brief Opcodes de 4 bits de todas as instruções do processador.
 typedef enum {
@@ -85,13 +85,6 @@ typedef struct BreakpointT {
 	uint16_t address;
 	int hits;
 } Breakpoint;
-
-/// @brief Vetor dinâmico de inteiros
-typedef struct VectorT {
-	void** array;
-	int size;
-	int capacity;
-} Vector;
 
 /// @brief Definição da estrutura do emulador
 typedef struct {
@@ -148,22 +141,6 @@ void emuBadInstruction();
 void emuDumpRegisters();
 void emuPrintDisassemblyLine(uint16_t address);
 StringBuffer emuDisassembly(uint16_t instruction);
-
-// -- Funções de manipulação de vetor dinâmico
-
-void vecInit(Vector* vec);
-void vecFree(Vector* vec);
-void vecGrow(Vector* vec);
-void vecAdd(Vector* vec, void* elem);
-void vecRemove(Vector* vec, int index);
-void prints(const char* fmt, ...);
-
-// -- Funções auxiliares genéricas
-
-bool strEquals(const char* a, const char* b);
-void setBit(uint16_t* reg, int bit, bool value);
-bool getBit(uint16_t value, int bit);
-void toLowerCase(char* str);
 
 // Tabela com o nome das intruções para cada opcode
 static const char* const INSTRUCTION_NAMES[] = {
@@ -225,6 +202,7 @@ static const char* const ARIT_EXT_FMT[] = {
 static Emul emulator;
 static time_t lastInterruptBreak;
 static bool extendedNotation = false;
+bool terminalColorsEnabled = ENABLE_COLORS;
 
 /// @brief Entrada principal do programa. Essa função é chamada com um bloco de memória que corresponde ao
 /// estado inicial da memória do programa a ser emulado.
@@ -281,8 +259,7 @@ int processa(short int* m, int memSize) {
 // Imprime o cabeçalho de boas vindas
 void cliPrintWelcome() {
 	printf(TERM_CYAN "\n---- PROTO EMULATOR V1.1a ----\n");
-	printf("Author: " TERM_BOLD_MAGENTA "André Morales\n");
-	printf("\tgithub.com/andre-morales\n\n" TERM_RESET);
+	printf("GitHub: " TERM_BOLD_MAGENTA "https://github.com/andre-morales/emulador-oac\n\n" TERM_RESET);
 }
 
 // Instala signIntHandler como um monitor para o CTRL-C
@@ -593,8 +570,9 @@ void cliHelpCmd() {
 	printf("\nPressing it in quick succession will " TERM_BOLD_RED "quit" TERM_RESET " the emulator entirely.\n");
 	printf(TERM_CYAN  "\nhelp:" TERM_RESET " prints this help guide.\n");
 	printf(TERM_CYAN  "\nquit, q:" TERM_RESET " quits out of the emulator.\n");
-	prints("\n§6step, s§E <amount>§R");
+	prints("\n§6step, s§E [amount]§R");
 	prints("\n    Steps through§E amount§R of instructions and no further.\n");
+	prints("    If no amount is specified, steps a single instruction.\n");
 	printf(TERM_CYAN  "\ncontinue, c");
 	printf(TERM_RESET "\n    Leaves step-through mode and lets the emulator run freely.\n    Execution will be stopped upon encountering a fault or the user\n    pressing CTRL-C.\n");
 	printf(TERM_CYAN  "\nreset");
@@ -1209,103 +1187,4 @@ void signIntHandler(int sign) {
 
 	// Reset signal handler
 	signal(SIGINT, signIntHandler);
-}
-
-/// @brief Seta um bit do número passado
-/// @param reg Um pointeiro para um número o qual se deseja setar o bit
-/// @param bit A posição do bit. O bit 0 é o bit menos significante e o 15 o mais significante
-/// @param value Um booleano 1 ou 0 com o valor desejado
-void setBit(uint16_t* reg, int bit, bool value) {
-	uint16_t num = *reg;
-	num &= ~(1UL << bit);            // Clear bit first
-	num |= ((uint32_t)value) << bit; // Set bit
-	*reg = num;
-}
-
-/// @brief Obtém o valor do bit em uma posição no valor
-/// @param value O valor o qual se deseja extrair o bit
-/// @param bit A posição do bit desejado
-/// @return Um bool true se o bit está setado, false, caso contrário
-bool getBit(uint16_t value, int bit) {
-	return (value >> bit) & 1UL;
-}
-
-/// @brief Converte toda uma string para minúsculo
-void toLowerCase(char* str) {
-	while (*str) {
-		*str = tolower(*str);
-		str++;
-	}
-}
-
-/// @brief Verifica se duas strings são iguais
-bool strEquals(const char* a, const char* b) {
-	return strcmp(a, b) == 0;
-}
-
-/// @brief Inicializa um vetor dinâmico
-/// @param vec O próprio vetor a ser inicializado
-void vecInit(Vector* vec) {
-	vec->array = (void**) malloc(sizeof(void*));
-	vec->capacity = 1;
-	vec->size = 0;
-}
-
-/// @brief Libera a memória ocupada por um vetor dinâmico e libera todos os ponteiros contidos.
-void vecFree(Vector* vec) {
-	for (int i = 0; i < vec->size; i++) {
-		free(vec->array[i]);
-	}
-	free(vec->array);
-	
-	vec->array = NULL;
-	vec->capacity = -1;
-	vec->size = -1;
-}
-
-/// @brief Cresce a capacidade do vetor
-void vecGrow(Vector* vec) {
-	vec->capacity *= 2;
-	vec->array = realloc(vec->array, sizeof(void*) * vec->capacity);
-}
-
-/// @brief Adiciona um elemento no vetor
-void vecAdd(Vector* vec, void* elem) {
-	if (vec->capacity == vec->size) {
-		vecGrow(vec);
-	}
-
-	vec->array[vec->size] = elem;
-	vec->size++;
-}
-
-/// @brief Remove um um elemento pelo seu índice
-/// @param index O índice do elemento a ser removido 
-void vecRemove(Vector* vec, int index) {
-	// Assegura a validade do índice
-	assert(index < vec->size);
-
-	// Shift all elements to the left by one position
-	for (int i = index; i < vec->size - 1; i++) {
-		vec->array[i] = vec->array[i + 1];
-	}
-
-	vec->size--;
-}
-
-/// @brief Imprime uma string formatada no console utilizando § para as cores estilizadas.
-void prints(const char* fmt, ...) {
-	va_list args;
-	va_start(args, fmt);
-
-	StringBuffer buffer;
-	stbInit(&buffer);
-
-	stbAppendv(&buffer, fmt, args);
-	stbColorize(&buffer, ENABLE_COLORS);
-	printf("%s", buffer.array);
-
-	stbFree(&buffer);
-
-	va_end(args);
 }
