@@ -33,9 +33,6 @@
 #define FAULT_ON_LOOP_AROUND 1
 
 #include "driverEP1.h"
-#include "StringBuffer.h"
-#include "Util.h"
-#include "Colors.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -43,7 +40,40 @@
 #include <stdbool.h>
 #include <assert.h>
 #include <signal.h>
+#include <ctype.h>
 #include <time.h>
+
+// -- Sequências de escape para as cores no console
+#if ENABLE_COLORS
+#define TERM_BOLD_BLACK		"\033[1;30m"
+#define TERM_BOLD_RED		"\033[1;31m"
+#define TERM_BOLD_GREEN		"\033[1;32m"
+#define TERM_BOLD_YELLOW	"\033[1;33m"
+#define TERM_BOLD_MAGENTA	"\033[1;35m"
+#define TERM_BOLD_CYAN		"\033[1;36m"
+#define TERM_BOLD_WHITE		"\033[1;37m"
+#define TERM_RED			"\033[0;31m"
+#define TERM_GREEN			"\033[32m"
+#define TERM_YELLOW			"\033[33m"
+#define TERM_MAGENTA		"\033[0;35m"
+#define TERM_CYAN			"\033[0;36m"
+#define TERM_WHITE			"\033[37m"
+#define TERM_RESET			"\033[0m"
+#else
+#define TERM_BOLD_BLACK		""
+#define TERM_BOLD_RED		""
+#define TERM_BOLD_GREEN		""
+#define TERM_BOLD_YELLOW	""
+#define TERM_BOLD_MAGENTA	""
+#define TERM_BOLD_CYAN		""
+#define TERM_BOLD_WHITE		""
+#define TERM_RED			""
+#define TERM_GREEN			""
+#define TERM_YELLOW			""
+#define TERM_MAGENTA		""
+#define TERM_CYAN			""
+#define TERM_RESET			""
+#endif
 
 /// @brief Opcodes de 4 bits de todas as instruções do processador.
 typedef enum {
@@ -67,6 +97,13 @@ typedef enum {
 	ARIT_ADD  = 0b110,
 	ARIT_SUB  = 0b111
 } AritOp;
+
+/// @brief Vetor dinâmico de inteiros
+typedef struct VectorT {
+	void** array;
+	int size;
+	int capacity;
+} Vector;
 
 // Definição dos registradores do processador
 typedef struct {
@@ -107,6 +144,41 @@ typedef enum {
 typedef enum {
 	EMU_OK, EMU_HALT, EMU_FAULT
 } EmuResult;
+
+
+/// @brief Permite a manipulação e concatenação de strings formatadas
+typedef struct StringBufferT {
+	char* array;
+	size_t size;
+	size_t capacity;
+} StringBuffer;
+
+
+// -- Funções de manipulação de vetor dinâmico
+
+void vecInit(Vector* vec);
+void vecFree(Vector* vec);
+void vecGrow(Vector* vec);
+void vecAdd(Vector* vec, void* elem);
+void vecRemove(Vector* vec, int index);
+void prints(const char* fmt, ...);
+
+// -- Funções auxiliares genéricas
+
+bool strEquals(const char* a, const char* b);
+void setBit(uint16_t* reg, int bit, bool value);
+bool getBit(uint16_t value, int bit);
+void toLowerCase(char* str);
+
+// -- Funções auxiliares de manipulação de strings
+
+void stbInit(StringBuffer*);
+void stbGrow(StringBuffer* sb, size_t minRequiredSize);
+bool stbAppend(StringBuffer*, const char* fmt, ...);
+bool stbAppendv(StringBuffer* sb, const char* fmt, va_list args);
+void stbAppendBuffer(StringBuffer* sb, StringBuffer* buffer);
+void stbColorize(StringBuffer* sb, bool outputColors);
+void stbFree(StringBuffer*);
 
 // -- Funções de interface de linha de comando
 
@@ -1187,4 +1259,243 @@ void signIntHandler(int sign) {
 
 	// Reset signal handler
 	signal(SIGINT, signIntHandler);
+}
+
+// -- Funções de manipulação de StringBuffer --
+
+/// Inicializa um buffer de strings.
+void stbInit(StringBuffer* sb) {
+	sb->capacity = 2;
+	sb->size = 0;
+	sb->array = (char*) calloc(sb->capacity, sizeof(char));
+}
+
+/// @brief Expande um buffer de strings
+/// @param sb O buffer em si
+/// @param minRequiredSize O buffer deve crescer no mínimo o suficiente para conter esse valor
+void stbGrow(StringBuffer* sb, size_t minRequiredSize) {
+	// Heurística para determinar o fator de crescimento
+	size_t growthAmount = minRequiredSize * 2;
+	if (growthAmount < 8) growthAmount = 8;
+
+	sb->capacity += growthAmount;
+	sb->array = (char*) realloc(sb->array, sb->capacity * sizeof(char));
+}
+
+/// @brief Concatena no buffer uma string formatada
+/// @param sb O buffer previamente alocado pelo usuário
+/// @param fmt A string formatada em estilo printf
+/// @return Verdadeiro se a concatenação foi bem sucedida, falso caso contrário.
+bool stbAppend(StringBuffer* sb, const char* fmt, ...) {
+	va_list args;
+	va_start(args, fmt);
+
+	bool result = stbAppendv(sb, fmt, args);
+
+	va_end(args);
+	return result;
+}
+
+/// @brief Concatena a um string buffer uma string formatada com lista de parâmetros.
+/// @param sb O buffer em questão previamente inicializado.
+/// @param fmt A string de formatos no estilo printf.
+/// @param args A lista de argumentos.
+/// @return Verdadeiro se a concatenação foi bem sucedida, falso caso contrário.
+bool stbAppendv(StringBuffer* sb, const char* fmt, va_list args) {
+	// Obtém um ponteiro para a posição atual do buffer e a capacidade restante
+	char* ptr = &sb->array[sb->size];
+	size_t remaining = sb->capacity - sb->size;
+
+	// Tenta escrever no buffer sem aumentar o tamanho
+	va_list argsCopy;
+	va_copy(argsCopy, args);
+	int strSize = vsnprintf(ptr, remaining, fmt, argsCopy);
+	va_end(argsCopy);
+
+	// Erro de formatação. Não foi escrito nada
+	if (strSize < 0) return false;
+
+	// Escrita bem sucedida
+	if (strSize < remaining) {
+		sb->size += strSize;
+		return true;
+	}
+
+	// Expandimos o buffer e tentamos escrever no buffer mais uma vez
+	stbGrow(sb, strSize);
+	ptr = sb->array + sb->size;
+	remaining = sb->capacity - sb->size;
+	va_list argsCopy2;
+	va_copy(argsCopy2, args);
+	strSize = vsnprintf(ptr, remaining, fmt, args);
+	va_end(argsCopy2);
+
+	// Erro de formatação ou algum outro erro
+	if (strSize < 0) return false;
+
+	assert(strSize < remaining);
+	sb->size += strSize;
+	return true;
+}
+
+/// @brief Anexa os conteúdos de outro buffer a este buffer
+/// @param sb O buffer a ser expandido com conteúdos
+/// @param buffer O buffer a ser adicionado ao primeiro
+void stbAppendBuffer(StringBuffer* sb, StringBuffer* buffer) {
+	size_t newSize = sb->size + buffer->size;
+	if (sb->capacity < newSize) {
+		stbGrow(sb, newSize);
+	}
+
+	char* dst = sb->array + sb->size;
+	strcpy(dst, buffer->array);
+	sb->size += buffer->size;
+}
+
+/// @brief Substitui os símbols §X de cores pelos códigos ANSI necessários para gerar as cores.
+/// @param buffer o Buffer a ser colorizado.
+/// @param outputColors Se as cores devem ser só descartadas ao invés de traduzidas para cores
+/// no terminal.
+void stbColorize(StringBuffer* buffer, bool outputColors) {
+	// Rouba o array de caracteres e reinicializa o buffer do usuário
+	char* array = buffer->array;
+	buffer->array = NULL;
+	stbFree(buffer);
+	stbInit(buffer);
+
+	// Adiciona a primeira parte da string, anterior possívelmente ao símbolo §
+	char* token = strtok(array, "§");
+	if (array[0] == token[0]) {
+		stbAppend(buffer, token);
+		token = strtok(NULL, "§");
+	}
+
+	// Itera todas as partes da string precedidas de §
+	while (token) {
+		int color = token[0];
+		if (outputColors) {
+			if (color == 'R') {
+				stbAppend(buffer, "\033[0m");
+			} else if (color >= '8') {
+				if (color >= 'A') color -= 'A' - 2;
+				else color -= '8';
+				stbAppend(buffer, "\033[1;%im", 30 + color);
+			} else {
+				color -= '0';
+				stbAppend(buffer, "\033[0;%im", 30 + color);
+			}
+		}
+
+		stbAppend(buffer, token + 1);
+
+		token = strtok(NULL, "§");
+	}
+}
+
+/// Libera a memória utilizada pelo buffer de strings
+void stbFree(StringBuffer* sb) {
+	free(sb->array);
+	sb->array = NULL;
+	sb->size = 0;
+	sb->capacity = 0;
+}
+
+
+/// @brief Seta um bit do número passado
+/// @param reg Um pointeiro para um número o qual se deseja setar o bit
+/// @param bit A posição do bit. O bit 0 é o bit menos significante e o 15 o mais significante
+/// @param value Um booleano 1 ou 0 com o valor desejado
+void setBit(uint16_t* reg, int bit, bool value) {
+	uint16_t num = *reg;
+	num &= ~(1UL << bit);            // Clear bit first
+	num |= ((uint32_t)value) << bit; // Set bit
+	*reg = num;
+}
+
+/// @brief Obtém o valor do bit em uma posição no valor
+/// @param value O valor o qual se deseja extrair o bit
+/// @param bit A posição do bit desejado
+/// @return Um bool true se o bit está setado, false, caso contrário
+bool getBit(uint16_t value, int bit) {
+	return (value >> bit) & 1UL;
+}
+
+/// @brief Converte toda uma string para minúsculo
+void toLowerCase(char* str) {
+	while (*str) {
+		*str = tolower(*str);
+		str++;
+	}
+}
+
+/// @brief Verifica se duas strings são iguais
+bool strEquals(const char* a, const char* b) {
+	return strcmp(a, b) == 0;
+}
+
+/// @brief Inicializa um vetor dinâmico
+/// @param vec O próprio vetor a ser inicializado
+void vecInit(Vector* vec) {
+	vec->array = (void**) malloc(sizeof(void*));
+	vec->capacity = 1;
+	vec->size = 0;
+}
+
+/// @brief Libera a memória ocupada por um vetor dinâmico e libera todos os ponteiros contidos.
+void vecFree(Vector* vec) {
+	for (int i = 0; i < vec->size; i++) {
+		free(vec->array[i]);
+	}
+	free(vec->array);
+	
+	vec->array = NULL;
+	vec->capacity = -1;
+	vec->size = -1;
+}
+
+/// @brief Cresce a capacidade do vetor
+void vecGrow(Vector* vec) {
+	vec->capacity *= 2;
+	vec->array = realloc(vec->array, sizeof(void*) * vec->capacity);
+}
+
+/// @brief Adiciona um elemento no vetor
+void vecAdd(Vector* vec, void* elem) {
+	if (vec->capacity == vec->size) {
+		vecGrow(vec);
+	}
+
+	vec->array[vec->size] = elem;
+	vec->size++;
+}
+
+/// @brief Remove um um elemento pelo seu índice
+/// @param index O índice do elemento a ser removido 
+void vecRemove(Vector* vec, int index) {
+	// Assegura a validade do índice
+	assert(index < vec->size);
+
+	// Shift all elements to the left by one position
+	for (int i = index; i < vec->size - 1; i++) {
+		vec->array[i] = vec->array[i + 1];
+	}
+
+	vec->size--;
+}
+
+/// @brief Imprime uma string formatada no console utilizando § para as cores estilizadas.
+void prints(const char* fmt, ...) {
+	va_list args;
+	va_start(args, fmt);
+
+	StringBuffer buffer;
+	stbInit(&buffer);
+
+	stbAppendv(&buffer, fmt, args);
+	stbColorize(&buffer, terminalColorsEnabled);
+	printf("%s", buffer.array);
+
+	stbFree(&buffer);
+
+	va_end(args);
 }

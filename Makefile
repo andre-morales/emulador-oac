@@ -6,7 +6,7 @@ CFLAGS+=-Werror=return-type -Werror=incompatible-pointer-types
 # Desativa warnings para variáveis não utilizadas
 CFLAGS+=-Wno-unused-variable
 
-SOURCES=src/Emulador.c src/driverEP1.c src/StringBuffer.c src/Util.c
+SOURCES=src/Emulador.c src/driverEP1.c
 
 release: ep.exe
 debug: epd.exe
