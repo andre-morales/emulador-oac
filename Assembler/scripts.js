@@ -12,9 +12,14 @@ function main() {
 
 function doAssemble() {
 	let compilation = new Compilation();
-	if (compilation.perform()) {
-		let output = compilation.output();
-		$result.value = output;
+	try {
+		if (compilation.perform()) {
+			let output = compilation.output();
+			$result.value = output;
+		}
+	} catch(err) {
+		emitError(err);	
+		throw err;
 	}
 }
 
@@ -35,7 +40,7 @@ function emitHex(number, count) {
 
 function getRegisterCode(register, lower) {
 	if (lower && (register == 'psw' || register == 'r')) {
-		throw new BadSyntax(`The register '${register}' cannot be addressed here`);
+		throw new AssemblySyntaxError(`The register '${register}' cannot be addressed here`);
 	}
 	switch(register) {
 		case 'a':   return 0b000;
@@ -45,7 +50,7 @@ function getRegisterCode(register, lower) {
 		case 'r':   return 0b110;
 		case 'psw': return 0b111;
 		default:
-			throw new BadSyntax(`Invalid register '${register}'`);
+			throw new AssemblySyntaxError(`Invalid register '${register}'`);
 	}
 }
 
@@ -67,9 +72,11 @@ function toHexStr(number) {
 }
 
 function toAddress(str) {
+	if (isNaN(str)) throw new BadAddressError("Specified address is not a number!");
+
 	let address = Number(str)
-	if (address < 0) throw new BadAddressSyntax();
-	if (address > 0xFFF) throw new BadAddressSyntax();
+	if (address < 0) throw new BadAddressError();
+	if (address > 0xFFF) throw new BadAddressError();
 	return address;
 }	
 
@@ -88,35 +95,37 @@ class Compilation {
 
 		let content = $text.value;
 		let lines = content.split("\n");
-		let compilationError;
 
 		try {
 			for (; this.lineNo < lines.length; this.lineNo++) {
 				let line = lines[this.lineNo - 1].trim().toLowerCase();
+
+				// Remove comments if any
+				if (line.includes(';')) {
+					line = line.substring(0, line.indexOf(';'));
+				}
+
 				if (!line) continue;
 
 				// If line is a label definition
 				if (line.endsWith(":")) {
-					let labelName = line.substring(0, line.length - 1);
-					let position = this.position;
-					this.labels[labelName] = position;
+					this.defineLabel(line);
+					continue;
+				}
 
-					// Fix all fixups associated with this label, if any;
-					let fixes = this.fixups.get(labelName);
-					if (fixes) {
-						console.log(fixes);
-						for (let fix of fixes) {
-							console.log('fixing' + fix);
-							this.memory[fix] |= position;
-						}
-						this.fixups.delete(labelName);
-					}
+				// If line is a location definition
+				if (line.startsWith('.')) {
+					let location = line.substring(1);
+					this.moveHeadTo(Number(location));
 					continue;
 				}
 
 				let tokens = line.split(" ");
 				let instr = tokens[0];
 				switch(instr) {
+				case '#fill':
+					this.fillPattern = Number(tokens[1]);
+					break;
 				case 'dw':
 					this.interpretDataDirective(line);				
 					break;
@@ -149,6 +158,10 @@ class Compilation {
 					this.emit(0x4000 | address);
 					break;
 				}
+				case 'ret': {
+					this.emit(0x5000);
+					break;
+				}
 				case 'arit': {
 					let opcode = this.interpretArit(line);
 					this.emit(opcode);
@@ -163,11 +176,12 @@ class Compilation {
 					this.emit(0xFFFF);
 					break;
 				default:
-					throw new BadSyntax(`Unknown mnemonic '${tokens[0]}'`);
+					throw new AssemblySyntaxError(`Unknown mnemonic '${tokens[0]}'`);
 				}
 			}
 
 			if (this.fixups.size) {
+				console.error(this.fixups);
 				throw new AssemblingError("Compilation finished with incomplete fixups!");
 			}
 			
@@ -175,27 +189,43 @@ class Compilation {
 			if (!(err instanceof AssemblingError)) {
 				throw err;
 			}
-			compilationError = err;
+
 			emitError("Compilation terminated! Line " + this.lineNo + ": " + err);
-		}
-		
-		if (compilationError) {
-			emitError("Assembling errored out.");
 			return false;
 		}
 
 		emitInfo("Assembling successful.");
 		return true;
 	}
-	
+
+	defineLabel(line) {
+		let labelName = line.substring(0, line.length - 1);
+		this.labels[labelName] = this.position;
+
+		// Check if this label has any pending fixups
+		let fixes = this.fixups.get(labelName);
+		if (!fixes) return;
+
+		// Perform address fixup for all positions and then erase the list
+		for (let fix of fixes) {
+			this.memory[fix] &= 0xF000;
+			this.memory[fix] |= this.position;
+		}
+		this.fixups.delete(labelName);
+	}
+
 	interpretDataDirective(line) {
 		let tokens = line.split(" ");
 		if (tokens[0] == 'dw') {
-			let number = Number(tokens[1]);
-			if (number > 0xFFFF) throw new BadSyntax("Number exceeds word size.");
-			this.emit(number);
+			if (tokens[1].startsWith(":")) {
+				this.emit(this.getTarget(tokens[1]));
+			} else {
+				let number = Number(tokens[1]);
+				if (number > 0xFFFF) throw new AssemblySyntaxError("Number exceeds word size.");
+				this.emit(number);
+			}
 		} else {
-			throw BadSyntax("Bad data directive: " + tokens[0]);
+			throw AssemblySyntaxError("Bad data directive: " + tokens[0]);
 		}
 	}
 	
@@ -215,7 +245,7 @@ class Compilation {
 		case 'add': opcode |= 0b110000000000; break;
 		case 'sub': opcode |= 0b111000000000; break;
 		default:
-			throw new BadSyntax(`Invalid arit operation '${operation}'`);
+			throw new AssemblySyntaxError(`Invalid arit operation '${operation}'`);
 		}
 	
 		let destination = args[1].trim();
@@ -234,7 +264,7 @@ class Compilation {
 			case 'c':   opcode |= 0b110; break;
 			case 'd':   opcode |= 0b111; break;
 			default:
-				throw new BadSyntax(`Invalid arit second register '${reg1}'`);
+				throw new AssemblySyntaxError(`Invalid arit second register '${reg1}'`);
 		}
 	
 		return opcode;
@@ -250,7 +280,7 @@ class Compilation {
 		let reg2 = '0';
 	
 		if (args[1] != '=') {
-			throw BadSyntax("Calc instruction missing equals sign!");
+			throw AssemblySyntaxError("Calc instruction missing equals sign!");
 		}
 	
 		// Short CALC instructions of the form CALC D = XXX
@@ -280,7 +310,7 @@ class Compilation {
 			case '+': operation = 'add'; break;
 			case '-': operation = 'sub'; break;
 			default:
-				throw new BadSyntax("Invalid CALC operation '" + args[3] + "'");
+				throw new AssemblySyntaxError("Invalid CALC operation '" + args[3] + "'");
 			}
 			reg2 = args[4];
 		}
@@ -307,7 +337,7 @@ class Compilation {
 
 			// Save the current memory position as a pending fixup for the given label.
 			fixList.push(this.position);
-			return 0x0;
+			return 0xF13;
 		}
 
 		// Target is a pure address, convert it and return
@@ -316,8 +346,8 @@ class Compilation {
 	}
 
 	output() {
-		const bundling = false;
-		let output = "";
+		const bundling = true;
+		let output = "v2.0 raw\n";
 
 		for (let i = 0; i < this.memory.length; ) {
 			let times = 1;
@@ -335,6 +365,7 @@ class Compilation {
 				i++;
 			}
 
+			if (value < 0 || value > 0xFFFF) throw new AssemblingError(`Cannot output number outside 16-bit bounds. [${i - 1}] = ${value}`);
 			output += toHexStr(value) + ' ';
 		}
 		return output;
@@ -378,17 +409,17 @@ class AssemblingError extends Error {
 	}
 }
 
-class BadSyntax extends AssemblingError {
+class AssemblySyntaxError extends AssemblingError {
 	constructor(message) {
 		super(message);
-		this.name = "BadSyntax";
+		this.name = "AssemblySyntaxError";
 	}
 }
 
-class BadAddressSyntax extends BadSyntax {
+class BadAddressError extends AssemblySyntaxError {
 	constructor(message) {
 		super(message);
-		this.name = "BadAddressSyntax";		
+		this.name = "BadAddressError";		
 	}
 }
 
