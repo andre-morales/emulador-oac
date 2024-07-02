@@ -46,7 +46,13 @@ textarea:focus {
 
 #info {
 	flex-grow: 1;
+	padding: 0.5rem;
+	font-family: 'Helvetica';
 	background-color: rgb(40, 40, 31);
+}
+
+#info p {
+	margin: 0 0 .5rem 0;
 }
 
 #editor-assembly {

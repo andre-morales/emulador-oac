@@ -935,10 +935,12 @@ void emuDoArit(uint16_t argument) {
 
 	// Compara os operandos 1 e 2 e seta os bits 13, 12 e 11 de acordo com as comparações
 	bool less = op1 < op2;
-	bool equal = op1 == op2;
-	bool greater = op1 > op2;
 	setBit(PSW, 13, less);
+	
+	bool equal = op1 == op2;
 	setBit(PSW, 12, equal);
+
+	bool greater = op1 > op2;
 	setBit(PSW, 11, greater);
 }
 

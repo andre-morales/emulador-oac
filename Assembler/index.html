@@ -1,6 +1,7 @@
 <!DOCTYPE html>
-<html>
+<html lang="en-US">
 	<head>
+		<meta charset="utf-8"/>
 		<link rel="stylesheet" href="./styles.css"/>
 		<script src="./scripts.js"></script>
 		<title>Assembler</title>
@@ -8,19 +9,38 @@
 	<body onload="main();">
 		<nav>
 			<button onclick="doAssemble();">Assemble</button>
+			<select>
+				<option value="logisim">Logisim v2.0 raw</option>
+			</select>
 		</nav>
 		<div id="editor-assembly">
 			<div id="editor">
-				<textarea id="text-area">NOP
+				<textarea id="text-area">
+begin:
+NOP
+LDA 0x100
+ARIT ADD, B, A, 0
+LDA 0x102
+ARIT ADD, A, A, B
+STA 0x50
+ARIT ADD, B, PSW, 0
+LDA 0x130
+ARIT AND, A, A, B
 
-JMP 400
-HLT
-				</textarea>
+CALC B = 0
+CALC B = FFFF
+CALC B = ~A
+CALC B = A & B
+jmp :begin
+
+what:
+nop
+hlt
+
+</textarea>
 			</div>
 			<textarea id="assembly"></textarea>
 		</div>
-		<div id="info">
-			info
-		</div>
+		<div id="info"></div>
 	</body>
 </html>
