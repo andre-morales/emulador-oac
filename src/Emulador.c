@@ -26,6 +26,9 @@
 // Se habilitado, por padrão interromperá a execução quando houver uma fault
 #define BREAK_AT_FAULTS 1
 
+// Se habilitado, antes de terminar a execução do programa, interrompe uma última vez o depurador
+#define BREAK_AT_HALT 1
+
 // Configura se a notação extendida ou padrão será usada nos disassemblies
 #define DEFAULT_EXTENDED_NOTATION 1
 
@@ -370,11 +373,16 @@ CliControl cliBeforeExecute() {
 /// @brief Verifica se há um breakpoint válido na instrução atual.
 /// Caso houver, pare a execução do emulador e imprime uma mensagem na tela.
 void emuCheckBreakpoints() {
+	// Obtém o breakpoint declarado nessa posição de memória
 	uint16_t PC = emulator.registers->PC;
 	Breakpoint* bp = emuGetBreakpoint(PC);
+
+	// Se houver o breakpoint e ele ainda estiver ativo
 	if (bp && bp->hits != 0) {
+		// Coloca o emulador em modo step-through
 		emulator.stepsLeft = 0;
 		emulator.breaking = true;
+
 		if (bp->hits > 0) bp->hits--;
 		printf(TERM_GREEN "You've hit a breakpoint at " TERM_YELLOW "0x%03X.\n" TERM_RESET, PC);
 		
@@ -383,6 +391,15 @@ void emuCheckBreakpoints() {
 		} else if (bp->hits == 0) {
 			printf(TERM_GREEN "This breakpoint was disabled.\n" TERM_RESET);
 		}
+	} else {
+		#if BREAK_AT_HALT
+			uint16_t opcode = (emulator.registers->RI & 0xF000) >> 12;
+			if (opcode == OPCODE_HLT) {
+				// Coloca o emulador em modo step-through
+				emulator.stepsLeft = 0;
+				emulator.breaking = true;
+			}
+		#endif
 	}
 }
 
@@ -817,7 +834,7 @@ EmuResult emuExecute(uint16_t instruction) {
 		// Salva o contador de programa atual. O contador passará a ser o endereço em R,
 		// e R passará a ser o endereço da instrução depois dessa
 		uint16_t pc = regs->PC;
-		regs->PC = regs->R;
+		regs->PC = regs->R - 1;
 		regs->R = pc + 1;
 		break;
 	}
