@@ -5,6 +5,8 @@ O programa aceita como entrada os conteúdos da memória préviamente programada
 
 ![Prompt de comando com exemplo de saída do emulador](./img/exemplo.png)
 
+![](./Assembler/exemplo.png)
+
 ## :toolbox: Funcionalidas do Emulador
 Eis uma breve lista de todas as funcões que podem ser utilizadas para auxiliar na depuração:
 - **Execução _step-through_**: Permite executar instrução por instrução, uma a uma, visualizando como cada instrução afeta o estado do processador emulado.
