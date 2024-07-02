@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<link rel="stylesheet" href="./styles.css"/>
+		<script src="./scripts.js"></script>
+		<title>Assembler</title>
+	</head>
+	<body onload="main();">
+		<nav>
+			<button onclick="doAssemble();">Assemble</button>
+		</nav>
+		<div id="editor-assembly">
+			<div id="editor">
+				<textarea id="text-area">NOP
+
+JMP 400
+HLT
+				</textarea>
+			</div>
+			<textarea id="assembly"></textarea>
+		</div>
+		<div id="info">
+			info
+		</div>
+	</body>
+</html>
