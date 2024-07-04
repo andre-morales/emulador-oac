@@ -7,13 +7,13 @@ body {
 	flex-direction: column;
 	height: 100vh;
 	margin: 0;
-	font-family: 'Lato';
+	font-family: 'Helvetica';
 	background-color: rgb(36, 35, 41);
 	color: white;
 }
 
 #editor {
-	width: 60%;
+	width: 75%;
 	resize: horizontal;
 	overflow-x: auto;
 	overflow-y: hidden;
@@ -37,11 +37,19 @@ textarea:focus {
 	outline: none;
 }
 
-#assembly {
+#output-panel {
+	display: flex;
+	flex-direction: column;
 	flex-grow: 1;
 	height: 100%;
 	background: rgba(62, 61, 51);
+}
+
+#assembly {
+	width: 100%;
+	flex-grow: 1;
 	resize: none;
+	background: rgba(62, 61, 51);
 }
 
 #info {
@@ -60,6 +68,37 @@ textarea:focus {
 	resize: vertical;
 	overflow: auto;
 	border-bottom: groove 2px gray;
-	height: 70%;
+	height: 80%;
 }
 
+nav {
+	vertical-align: top;
+}
+
+button {
+	margin: 2px;
+	padding: 4px 8px;
+	border: none;
+	font: 13pt 'Helvetica';
+	background-color: rgb(65, 67, 58);
+	color: white;
+}
+
+button:active {
+	background-color: rgb(40, 40, 31);
+}
+
+select {
+	padding: 4px 8px;
+	border: none;
+	font: 13pt 'Helvetica';
+	background-color: rgb(65, 67, 58);
+	color: white;
+}
+
+nav span {
+	float: right;
+	margin: .5rem 1rem 0 0;
+	font: 13pt 'Helvetica';
+	font-style: italic;
+}

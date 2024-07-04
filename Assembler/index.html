@@ -4,15 +4,17 @@
 		<meta charset="utf-8"/>
 		<link rel="stylesheet" href="./styles.css"/>
 		<script src="./scripts.js"></script>
+		<script src="./compiler.js"></script>
 		<title>Assembler</title>
 	</head>
 	<body onload="main();">
 		<nav>
 			<button onclick="doAssemble();">Assemble</button>
-			<select>
-				<option value="logisim">Logisim v2.0 raw</option>
+			<select id="output-fmt">
+				<option value="hex">Spaced hex</option>
+				<option value="logisim" selected>Logisim v2.0 raw</option>
 			</select>
-			<span>Logism Custom Assembler Beta 1.0</span>
+			<span>Custom Assembler Beta 1.0</span>
 		</nav>
 		<div id="editor-assembly">
 			<div id="editor">
@@ -41,7 +43,13 @@ hlt
 
 </textarea>
 			</div>
-			<textarea id="assembly"></textarea>
+			<div id="output-panel">
+				<textarea id="assembly" readonly></textarea>
+				<div>
+					<button onclick="copyContentToClipboard();">Copy output</button>
+					<button onclick="saveContentAs();">Save output as...</button>
+				</div>
+			</div>
 		</div>
 		<div id="info"></div>
 	</body>
