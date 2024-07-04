@@ -4,12 +4,14 @@ var $text;
 var $result;
 var $info;
 var $outputSelect
+var editor;
 
 function main() {
 	$text = document.getElementById("text-area");
 	$result = document.getElementById("assembly");
 	$info = document.getElementById("info");
 	$outputSelect = document.getElementById("output-fmt");
+	editor = new Editor();
 }
 
 function copyContentToClipboard() {

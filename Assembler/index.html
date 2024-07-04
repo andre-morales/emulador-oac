@@ -5,6 +5,7 @@
 		<link rel="stylesheet" href="./styles.css"/>
 		<script src="./scripts.js"></script>
 		<script src="./compiler.js"></script>
+		<script src="./editor.js"></script>
 		<title>Assembler</title>
 	</head>
 	<body onload="main();">
@@ -14,10 +15,11 @@
 				<option value="hex">Spaced hex</option>
 				<option value="logisim" selected>Logisim v2.0 raw</option>
 			</select>
-			<span>Custom Assembler Beta 1.0</span>
+			<span>Custom Assembler Beta 1.1</span>
 		</nav>
 		<div id="editor-assembly">
 			<div id="editor">
+				<div id='line-numbers'></div>
 				<textarea id="text-area" spellcheck="false">
 begin:
 NOP
