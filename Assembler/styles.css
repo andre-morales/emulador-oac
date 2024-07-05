@@ -12,39 +12,86 @@ body {
 	color: white;
 }
 
+.token.register {
+	color: #FD9622;
+}
+
+#editor-output-split {
+	display: flex;
+	resize: vertical;
+	overflow: auto;
+	border-bottom: groove 2px gray;
+	height: 80%;
+}
+
 #editor {
+	--font-size: 14pt;
+	--font-family: 'Consolas';
+	--font-weight: 700;
+	--line-height: 1.1;
+
 	display: flex;
 	width: 75%;
 	resize: horizontal;
 	overflow-x: auto;
 	overflow-y: hidden;
-	font-family: 'Consolas';
+
+	font: var(--font-weight) var(--font-size) var(--font-family);
+	line-height: var(--line-height);
+	background-color: rgb(39, 40, 34);
+}
+
+#editor-stack {
+	position: relative;
+	flex-grow: 1;	
+	height: 100%;
+}
+
+#pre-code {
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: 0;
+	bottom: 0;
+	margin: 0;
+	padding: 0;
+	line-height: var(--line-height);
+}
+
+#code {
+	line-height: var(--line-height);
+	white-space: pre-wrap;
 }
 
 #line-numbers {
+	flex-shrink: 0;
 	overflow: hidden;
 	padding: 0 1rem 0 0;
 	text-align: right;
 	color: gray;
-
-	font: 14pt 'Consolas';
-	font-weight: 700;
-	line-height: 1.1;
 }
 
 #text-area {
-	flex-grow: 1;	
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+
 	border: none;
 	margin: 0;
 	padding: 0;
 	outline: none;
 	resize: none;
-	font: 14pt 'Consolas';
-	font-weight: 700;
-	line-height: 1.1;
-	tab-size: 4;
 
-	background-color: rgb(39, 40, 34);
+	font: var(--font-weight) var(--font-size) var(--font-family);
+	line-height: var(--line-height);
+	tab-size: 4;
+	white-space: pre-wrap;
+
+	background: none;
+	color: transparent;
+	caret-color: white;
 }
 
 textarea {
@@ -79,14 +126,6 @@ textarea:focus {
 
 #info p {
 	margin: 0 0 .5rem 0;
-}
-
-#editor-assembly {
-	display: flex;
-	resize: vertical;
-	overflow: auto;
-	border-bottom: groove 2px gray;
-	height: 80%;
 }
 
 nav {

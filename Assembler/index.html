@@ -2,6 +2,7 @@
 <html lang="en-US">
 	<head>
 		<meta charset="utf-8"/>
+		<link href="prism/prism.css" rel="stylesheet" />
 		<link rel="stylesheet" href="./styles.css"/>
 		<script src="./scripts.js"></script>
 		<script src="./compiler.js"></script>
@@ -9,41 +10,23 @@
 		<title>Assembler</title>
 	</head>
 	<body onload="main();">
+		<script src="prism/prism.js"></script>
+		<script src="prism/custom-assembly.js"></script>
 		<nav>
 			<button onclick="doAssemble();">Assemble</button>
 			<select id="output-fmt">
 				<option value="hex">Spaced hex</option>
 				<option value="logisim" selected>Logisim v2.0 raw</option>
 			</select>
-			<span>Custom Assembler Beta 1.1</span>
+			<span>Custom Assembler Beta 2</span>
 		</nav>
-		<div id="editor-assembly">
+		<div id="editor-output-split">
 			<div id="editor">
 				<div id='line-numbers'></div>
-				<textarea id="text-area" spellcheck="false">
-begin:
-NOP
-LDA 0x100
-ARIT ADD, B, A, 0
-LDA 0x102
-ARIT ADD, A, A, B
-STA 0x50
-ARIT ADD, B, PSW, 0
-LDA 0x130
-ARIT AND, A, A, B
-
-.0x200
-CALC B = 0
-CALC B = FFFF
-CALC B = ~A
-CALC B = A & B
-jmp :begin
-
-what:
-nop
-hlt
-
-</textarea>
+				<div id="editor-stack">
+					<pre id="pre-code"><code id="code" class="language-custom_assembly"></code></pre>
+					<textarea id="text-area" spellcheck="false"></textarea>
+				</div>
 			</div>
 			<div id="output-panel">
 				<textarea id="assembly" readonly></textarea>

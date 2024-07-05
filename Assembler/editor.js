@@ -3,34 +3,55 @@ class Editor {
 		// Text area internal padding. This is OS-dependent. Increasing it will make the editor
 		// think the area is smaller.
 		this.PADDING_ADJUST = 5;
-
 		this.tabWidth = 4;
-		this.$text = document.getElementById("text-area");
+
+		this.$textArea = document.getElementById("text-area");
+		this.$preCode = document.getElementById("pre-code");
+		this.$code = document.getElementById("code");
 		this.$lineNumbers = document.getElementById("line-numbers");
 
 		this.tabReplacement = new Array(this.tabWidth + 1).join(' ');
 		this.makeGraphicsContext();
 
-		// Mirror text area scrolling
-		this.$text.addEventListener('scroll', () => {
-			this.$lineNumbers.scrollTop = this.$text.scrollTop;
+		// Update line numbers if necessary
+		this.$textArea.addEventListener('input', () => {
+			this.displayLineNumbers();
+			this.highlightText();
+			this.syncScroll();
 		});
 
-		// Update line numbers if necessary
-		this.$text.addEventListener('input', () => {
-			this.displayLineNumbers();
+		this.$textArea.addEventListener('scroll', () => {
+			this.syncScroll();
 		});
 
 		// Update line numbers on resizes
-		const ro = new ResizeObserver(() => {
+		let observer = new ResizeObserver(() => {
 			this.displayLineNumbers();
 		});
-		ro.observe(this.$text);
+		observer.observe(this.$textArea);
+	}
+
+	highlightText() {
+		let content = this.$textArea.value;
+
+		// Add a space if the last character is a newline to handle scroll sync issues.
+		if(content[content.length - 1] == '\n') {
+			content += " ";
+		}
+
+		this.$code.innerHTML = content;
+		Prism.highlightElement(this.$code);
+	}
+
+	syncScroll() {
+		this.$lineNumbers.scrollTop = this.$textArea.scrollTop;
+		this.$preCode.scrollTop = this.$textArea.scrollTop;
+		this.$preCode.scrollLeft = this.$textArea.scrollLeft;
 	}
 
 	makeGraphicsContext() {
 		// Discover font used in text area
-		let styles = window.getComputedStyle(this.$text);
+		let styles = window.getComputedStyle(this.$textArea);
 
 		// Create graphics context trough canvas and set the same font
 		let canvas = document.createElement('canvas');
@@ -46,12 +67,12 @@ class Editor {
 		const parseValue = (v) => v.endsWith('px') ? parseInt(v.slice(0, -2), 10) : 0;
 
 		// Get all CSS properties in the textarea
-		const fieldStyles = window.getComputedStyle(this.$text);
+		const fieldStyles = window.getComputedStyle(this.$textArea);
 
 		// Discover the true size of the text area
 		let paddingLeft = parseValue(fieldStyles.paddingLeft);
 		let paddingRight = parseValue(fieldStyles.paddingRight);
-		let fieldWidth = this.$text.getBoundingClientRect().width - paddingLeft - paddingRight - this.PADDING_ADJUST;
+		let fieldWidth = this.$textArea.getBoundingClientRect().width - paddingLeft - paddingRight - this.PADDING_ADJUST;
 
 		let lineCount = 0;
 		let currentLine = '';
@@ -84,7 +105,7 @@ class Editor {
 
 	makeLineNumbers() {
 		// Calculate how many lines there are in each true line of the content.
-		let textLines = this.$text.value.split('\n');
+		let textLines = this.$textArea.value.split('\n');
 		let lineCounts = textLines.map((line) => this.calculateNumLines(line));
 		
 		let numbers = [];
