@@ -74,9 +74,10 @@ function emitInfo(message) {
 }
 
 class AssemblingError extends Error {
-	constructor(message) {
+	constructor(message, lineNo) {
 		super(message);
 		this.name = "AssemblingError";		
+		this.lineNo = lineNo;
 	}
 }
 

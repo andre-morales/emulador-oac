@@ -96,7 +96,13 @@ class Compilation {
 			}
 
 			if (this.fixups.size) {
-				console.error(this.fixups);
+				for (let [name, list] of this.fixups) {
+					emitError("No symbol '" + name + "'");
+					for (let fixup of list) {
+						emitError("|    Requested at line " + fixup.lineNo + " for address 0x" + toHexStr(fixup.address));
+					}
+				}
+
 				throw new AssemblingError("Compilation finished with incomplete fixups!");
 			}
 			
@@ -105,7 +111,7 @@ class Compilation {
 				throw err;
 			}
 
-			emitError("Compilation terminated! Line " + this.lineNo + ": " + err);
+			emitError("Compilation interrupted! Line " + this.lineNo + ": " + err);
 			return false;
 		}
 
@@ -123,8 +129,9 @@ class Compilation {
 
 		// Perform address fixup for all positions and then erase the list
 		for (let fix of fixes) {
-			this.memory[fix] &= 0xF000;
-			this.memory[fix] |= this.position;
+			let addr = fix.address;
+			this.memory[addr] &= 0xF000;
+			this.memory[addr] |= this.position;
 		}
 		this.fixups.delete(labelName);
 	}
@@ -242,7 +249,9 @@ class Compilation {
 			let position = this.labels[labelName];
 			if (position !== undefined) return position;
 
-			// Label was not defined yet, save it as a fixup and return 0.
+			// Label was not defined yet, create a fixup.
+			let fixup = new Fixup(this.position, this.lineNo);
+
 			// Get fixup list for this label, or create one if necessary.
 			let fixList = this.fixups.get(labelName);
 			if (!fixList) {
@@ -251,7 +260,7 @@ class Compilation {
 			}
 
 			// Save the current memory position as a pending fixup for the given label.
-			fixList.push(this.position);
+			fixList.push(fixup);
 			return 0xF13;
 		}
 
@@ -335,6 +344,13 @@ class Compilation {
 		this.memory.fill(this.fillPattern, currentPointer, this.position);
 
 		this.position += times;
+	}
+}
+
+class Fixup {
+	constructor(address, lineNo) {
+		this.address = address;
+		this.lineNo = lineNo;
 	}
 }
 
