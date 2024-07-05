@@ -392,7 +392,7 @@ void emuCheckBreakpoints() {
 			printf(TERM_GREEN "This breakpoint was disabled.\n" TERM_RESET);
 		}
 	} else {
-		#if BREAK_AT_HALT
+		#if BREAK_AT_HALT && !DUMMY_MODE
 			uint16_t opcode = (emulator.registers->RI & 0xF000) >> 12;
 			if (opcode == OPCODE_HLT) {
 				// Coloca o emulador em modo step-through

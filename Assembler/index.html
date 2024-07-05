@@ -2,23 +2,25 @@
 <html lang="en-US">
 	<head>
 		<meta charset="utf-8"/>
-		<link href="prism/prism.css" rel="stylesheet" />
-		<link rel="stylesheet" href="./styles.css"/>
-		<script src="./scripts.js"></script>
-		<script src="./compiler.js"></script>
-		<script src="./editor.js"></script>
+		<link href="src/prism/prism.css" rel="stylesheet" />
+		<link href="src/styles.css" rel="stylesheet"/>
+		<link href="src/prism/custom-assembly.css" rel="stylesheet" />
+		<script src="src/scripts.js"></script>
+		<script src="src/compiler.js"></script>
+		<script src="src/editor.js"></script>
 		<title>Assembler</title>
 	</head>
 	<body onload="main();">
-		<script src="prism/prism.js"></script>
-		<script src="prism/custom-assembly.js"></script>
+		<script src="src/prism/prism.js"></script>
+		<script src="src/prism/custom-assembly.js"></script>
 		<nav>
 			<button onclick="doAssemble();">Assemble</button>
 			<select id="output-fmt">
 				<option value="hex">Spaced hex</option>
 				<option value="logisim" selected>Logisim v2.0 raw</option>
 			</select>
-			<span>Custom Assembler Beta 2</span>
+			<span>Custom Assembler Beta 2 - <a href="github.com/andre-morales/emulador-oac">github.com/andre-morales/emulador-oac</a></span>
+			
 		</nav>
 		<div id="editor-output-split">
 			<div id="editor">

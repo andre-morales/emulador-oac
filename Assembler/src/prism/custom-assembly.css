@@ -1,0 +1,36 @@
+.token.directive {
+	color: #F82B72;
+}
+
+.token.data-directive {
+	color: #F82B72;
+}
+
+.token.register {
+	color: #FC9737;
+}
+
+.token.comment {
+	color: #888470;
+	font-weight: normal;
+}
+
+.token.op-code {
+	color: #69D9ED;
+}
+
+.token.control {
+	color: #6B92FF;
+}
+
+.token.label {
+	color: #E6DB7D;
+}
+
+.token.label-call {
+	color: #A7E248;
+}
+
+.token.punctuation {
+	color: #F8F8F2;
+}

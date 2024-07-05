@@ -1,5 +1,8 @@
 * {
 	box-sizing: border-box;
+	padding: 0;
+	margin: 0;
+	border: none;
 }
 
 body {
@@ -12,10 +15,6 @@ body {
 	color: white;
 }
 
-.token.register {
-	color: #FD9622;
-}
-
 #editor-output-split {
 	display: flex;
 	resize: vertical;
@@ -25,10 +24,10 @@ body {
 }
 
 #editor {
-	--font-size: 14pt;
+	--font-size: 16pt;
 	--font-family: 'Consolas';
-	--font-weight: 700;
-	--line-height: 1.1;
+	--font-weight: 500;
+	--line-height: 1.15;
 
 	display: flex;
 	width: 75%;
@@ -59,8 +58,9 @@ body {
 }
 
 #code {
-	line-height: var(--line-height);
 	white-space: pre-wrap;
+	font: var(--font-weight) var(--font-size) var(--font-family);
+	line-height: var(--line-height);
 }
 
 #line-numbers {
@@ -131,6 +131,10 @@ textarea:focus {
 
 nav {
 	vertical-align: top;
+}
+
+nav a {
+	color: lightblue;
 }
 
 button {

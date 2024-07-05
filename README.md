@@ -1,9 +1,13 @@
-# :gear: EP1 - Emulador do Processador de OAC-I
+# :gear: Emulador do Processador de OAC-I (EP1)
 
 Esse projeto visa e extensão do problema apresentado no EP1 da matéria de OAC e implementa um emulador interativo completo do processador 16 bits visto na disciplina ministrada pelo professor Fábio Nakano.
 O programa aceita como entrada os conteúdos da memória préviamente programada no simulador e executa sequencialmente as instruções, simulando o processador do Logisim.
 
 ![Prompt de comando com exemplo de saída do emulador](./img/exemplo.png)
+
+# :hammer: Assembler do Processador de OAC-I (EP3)
+
+Implementação de um editor de código e Assembler em HTML5 para a arquitetura apresentada na matéria de OAC. [Página do projeto nesse repositório.](./Assembler/)
 
 ![](./Assembler/exemplo.png)
 
@@ -35,5 +39,6 @@ No topo do arquivo principal há várias flags de compilação para que seja pos
 |START_IN_BREAKING_MODE|true|Se o emulador deve parar logo antes de executar a primeira instrução da memória, dando a oportunidade de explorar o estado da memória antes de executar efetivamente as instruções.
 |INSTALL_SIGINT_HANDLER|true|Habilita interceptar o CTRL-C do usuário para parar a execução do emulador sem sair do programa. Se configurado como falso, CTRL-C terá o comportamento padrão de sair inteiramente do programa.
 |BREAK_AT_FAULTS|true|Quando verdadeiro, o emulador será interrompido sempre que encontrar uma falha na execução de uma instrução. Caso falso, executará as próximas instruções sem pausa.
+|BREAK_AT_HALT|true|Se verdadeiro, o emulador será interrompido ao encontrar uma instrução HALT. As instruções fazem o emulador terminar a execução.
 |DEFAULT_EXTENDED_NOTATION|true|Se verdadeiro, utilizará uma notação mais visual para as instruções de operações aritméticas.
 |FAULT_ON_LOOP_AROUND|true|Por padrão, o _wrap around_ do contador de programa gerará uma falha no emulador e interromperá a execução. Entretanto o _wrap around_ do _Program Counter_ pode ser um comportamento desejado. Neste caso, se configurado como falso, será gerado apenas um warning.

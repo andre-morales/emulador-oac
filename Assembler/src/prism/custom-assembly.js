@@ -17,8 +17,10 @@ Prism.languages.custom_assembly = {
 		alias: 'selector'
 	},
 	'op-code': {
-		pattern: /\b(?:NOP|LDA|STA|JMP|JNZ|ARIT|CALC|RET|HLT)\b/i,
-		alias: 'keyword'
+		pattern: /\b(?:NOP|LDA|STA|ARIT|CALC)\b/i,
+	},
+	'control': {
+		pattern: /\b(?:JMP|JNZ|RET|HLT)\b/i,
 	},
 	'hex-number': {
 		pattern: /0x[\da-f]{1,4}\b/i,
@@ -36,7 +38,10 @@ Prism.languages.custom_assembly = {
 		pattern: /\b([abcdr]|psw)\b/i,
 		alias: 'variable'
 	},
-	'punctuation': /[(),:]/
+	'punctuation': {
+		pattern: /[(),:+-=&|~]/,
+		alias: 'property'
+	}
 
 	/*'string': /(["'`])(?:\\.|(?!\1)[^\\\r\n])*\1/,*/
 }
