@@ -1,7 +1,7 @@
 Prism.languages.custom_assembly = {
 	'comment': /;.*/,
 	'directive': {
-		pattern: /\n\.[\w]+/,
+		pattern: /^\.[\w]+/m,
 		alias: 'property'
 	},
 	'data-directive': {
@@ -13,8 +13,7 @@ Prism.languages.custom_assembly = {
 		alias: 'function'
 	},
 	'label-call': {
-		pattern: /\ \:[\w.]+$/m,
-		alias: 'selector'
+		pattern: /\ \:[\w.]+$/m
 	},
 	'op-code': {
 		pattern: /\b(?:NOP|LDA|STA|ARIT|CALC)\b/i,
@@ -39,9 +38,6 @@ Prism.languages.custom_assembly = {
 		alias: 'variable'
 	},
 	'punctuation': {
-		pattern: /[(),:+-=&|~]/,
-		alias: 'property'
+		pattern: /[=+\-~&|^]/
 	}
-
-	/*'string': /(["'`])(?:\\.|(?!\1)[^\\\r\n])*\1/,*/
 }
