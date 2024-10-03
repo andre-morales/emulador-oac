@@ -19,7 +19,7 @@ Eis uma breve lista de todas as funcões que podem ser utilizadas para auxiliar 
 - **Memory View**: Visualiza os conteúdos da memória para anlisar a localização das instruções, dados, e _breakpoints_ configurados.
 - **Register View**: Exibe o conteúdo de todos os registradores e flags de status da CPU simulada.
 
-## :arrow_forward: Uso
+## :arrow_forward: Usando o Emulador
 Este emulador permite controlar a execução do programa em qualquer ponto e visualizar o estado do processador e da memória através dos comandos de depuração. O programa possui vários comandos de exploração do estado da memória, visualizar instruções e registradores, configurar breakpoints e mais.
 Todos os comandos podem ser vistos com o emulador parado e digitando ```help``` no prompt.
 
@@ -30,6 +30,16 @@ Para compilar o emulador, deve-se obter os arquivos **driverEP1.c** e **driverEP
 
 O **Makefile** aqui disponibilizado já vem pronto para compilação, depuração e para alguns testes usando os arquivos de memória **.mem** também disponíveis no repositório mencionado.
 
+Para compilar a versão regular, utilize o comando:
+```bash
+$ make release
+```
+Isso deve gerar um executável ```emul``` que será o emulador. Para utilizá-lo, passe como argumento o arquivo de memória que se deseja executar, por exemplo:
+```bash
+$ emul sample.mem
+```
+
+### Customização
 No topo do arquivo principal há várias flags de compilação para que seja possível customizar o comportamento do emulador. A funcionalidade de cada flag é descrita no próprio código, mas também pode ser vista abaixo:
 
 |Flag|Padrão|Função|

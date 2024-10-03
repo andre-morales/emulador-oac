@@ -1,4 +1,4 @@
-all: release
+.PHONY: all release debug test1 test2 test3 test4 random clean
 
 CFLAGS=-std=c99 -Wall
 # Torna esses warnings em erros
@@ -8,34 +8,52 @@ CFLAGS+=-Wno-unused-variable
 
 SOURCES=src/Emulador.c src/driverEP1.c
 
-release: ep.exe
-debug: epd.exe
+ifeq ($(OS),Windows_NT)
+	TARGET=emul.exe
+	DTARGET=emuld.exe
+	NULLDEV=nul
+else 
+	TARGET=emul
+	DTARGET=emuld
+	NULLDEV=/dev/null
+endif
 
-test: ep.exe
-	ep sample.mem
+all: release
+release: $(TARGET)
+debug: $(DTARGET)
 
-test1: ep.exe
-	ep tests/overflowEesr-testado.mem
+test: release
+	emul sample.mem
 
-test2: ep.exe
-	ep tests/overflowEesr.mem
+test1: release
+	emul tests/overflowEesr-testado.mem
 
-test3: ep.exe
-	ep tests/movRegAcc.mem
+test2: release
+	emul tests/overflowEesr.mem
 
-test4: ep.exe
-	ep tests/initEPSW.mem
+test3: release
+	emul tests/movRegAcc.mem
 
-random: ep.exe
-	ep tests/random.mem
+test4: release
+	emul tests/initEPSW.mem
 
-ep.exe: $(SOURCES)
-	gcc $(SOURCES) -o ep.exe $(CFLAGS)
+random: release
+	emul tests/random.mem
 
-epd.exe: CFLAGS+=-g
-epd.exe: $(SOURCES)
-	gcc $(SOURCES) -o epd.exe $(CFLAGS) 
+$(TARGET): $(SOURCES)
+	echo $(TARGET)
+	gcc $(SOURCES) -o emul $(CFLAGS)
+
+$(DTARGET): CFLAGS+=-g
+$(DTARGET): $(SOURCES)
+	gcc $(SOURCES) -o emuld $(CFLAGS) 
 
 clean:
-	-rm *.exe
-	-del *.exe
+	@echo Cleaning all build files...
+	-@rm *.exe 2> $(NULLDEV)
+	-@del *.exe 2> $(NULLDEV)
+	-@rm emul 2> $(NULLDEV)
+	-@del emul 2> $(NULLDEV)
+	-@rm emuld 2> $(NULLDEV)
+	-@del emuld 2> $(NULLDEV)
+	@echo Done!
